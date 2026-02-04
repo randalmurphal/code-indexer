@@ -1,7 +1,7 @@
 # Code Indexing System for Claude Code
 
 **Date:** 2026-02-04
-**Status:** Draft
+**Status:** Ready for Implementation
 **Target Repos:** ~/repos/r3 (JS/TS), ~/repos/m32rimm (Python)
 
 ## Overview
@@ -207,6 +207,8 @@ Collection: "chunks"
 ├── content: string                     # Stored, may be redacted
 ├── has_secrets: bool                   # If secrets were redacted
 ├── follows_pattern: string?            # Pattern name if applicable
+├── is_test: bool                       # Test file (reduced retrieval weight)
+├── retrieval_weight: float             # 1.0 for production, 0.5 for tests
 └── vector: float[1024]                 # voyage-4-large
 ```
 
@@ -397,6 +399,7 @@ Semantic search by concept or natural language.
     "query": "string - describe what you're looking for",
     "repo": "string? - r3|m32rimm|all (default: inferred from cwd)",
     "module": "string? - filter to module (e.g., 'fisio.imports')",
+    "include_tests": "string? - include|exclude|only (default: include with lower weight)",
     "cursor": "string? - pagination cursor for more results",
     "limit": "int? - max results (default: 10)"
   }
@@ -810,6 +813,7 @@ pattern_detection:
 # ~/repos/m32rimm/.ai-devtools.yaml
 code-index:
   name: m32rimm
+  default_branch: develop  # Branch to track for indexing
 
   modules:
     fisio:
@@ -878,9 +882,160 @@ code-index:
 
 ---
 
-## Open Questions
+## Branch Management
 
-1. **Embedding model updates:** When Voyage releases newer models, what's the re-indexing strategy?
-2. **Cross-repo search:** How to handle queries that span r3 and m32rimm?
-3. **Test indexing:** Index tests by default or opt-in? Tests are useful for understanding usage patterns.
-4. **Stale index tolerance:** How old can index be before warning user?
+Index tracks the default branch only (e.g., `develop` for m32rimm, `main` for r3). Feature branches use the default branch's index.
+
+**Rationale:** Feature branch code is actively being written - you know where it is. The index helps with the 99% of code you *didn't* write.
+
+**Configuration:**
+
+```yaml
+code-index:
+  name: m32rimm
+  default_branch: develop  # Branch to track
+```
+
+**Triggers for re-indexing:**
+
+| Event | Trigger | Action |
+|-------|---------|--------|
+| Merge to default branch | Git post-merge hook | Incremental re-index of changed files |
+| Checkout to default branch | Git post-checkout hook | Sync if index is stale |
+| Manual | `code-indexer sync` | Full Merkle tree comparison |
+
+**Git hooks setup:**
+
+```bash
+# .git/hooks/post-merge
+#!/bin/sh
+code-indexer sync --incremental
+
+# .git/hooks/post-checkout
+#!/bin/sh
+# $3 is 1 for branch checkout, 0 for file checkout
+if [ "$3" = "1" ]; then
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    default_branch=$(code-indexer config get default_branch)
+    if [ "$current_branch" = "$default_branch" ]; then
+        code-indexer sync --incremental
+    fi
+fi
+```
+
+**Index state tracking:**
+
+```
+Redis key: index:branch:{repo}
+Value: {branch: "develop", commit: "abc123", indexed_at: "2026-02-04T10:00:00Z"}
+```
+
+On sync, compare current HEAD of default branch against stored commit. If different, incremental re-index.
+
+---
+
+## Test File Handling
+
+Test files are indexed by default but with reduced retrieval weight.
+
+**Rationale:** Tests show how code is actually used ("how do I call this function?"), but shouldn't dominate search results over production code.
+
+**Configuration:**
+
+```yaml
+# Qdrant metadata for test files
+is_test: true
+retrieval_weight: 0.5  # Half weight of production code
+```
+
+**Detection patterns:**
+
+```yaml
+test_patterns:
+  python:
+    - "**/test_*.py"
+    - "**/*_test.py"
+    - "**/tests/**/*.py"
+  javascript:
+    - "**/*.test.js"
+    - "**/*.spec.js"
+    - "**/test/**/*.js"
+    - "**/__tests__/**/*.js"
+```
+
+**Retrieval behavior:**
+
+Test results appear below production code with equivalent semantic scores. A test with score 0.90 ranks below production code with score 0.85 (0.90 × 0.5 = 0.45 effective).
+
+To explicitly search tests: `search_code("auth tests", include_tests: "only")`
+
+---
+
+## Embedding Model Strategy
+
+Embedding model is version-pinned. Upgrades are manual and explicit.
+
+**Current model:** `voyage-4-large`
+
+**Upgrade process:**
+
+```bash
+# Check current model
+code-indexer config get embedding.model
+# voyage-4-large
+
+# Upgrade (requires full re-index)
+code-indexer upgrade-embeddings --model voyage-5-large
+
+# This will:
+# 1. Confirm cost estimate (~$X for Y chunks)
+# 2. Create new Qdrant collection with new model
+# 3. Re-embed all chunks
+# 4. Swap active collection
+# 5. Delete old collection (after confirmation)
+```
+
+**Rationale:** Embedding models don't improve dramatically month-to-month. Upgrade when there's a clear reason (new code-specific model, significant quality improvement), not automatically.
+
+**Version tracking:**
+
+```
+Redis key: index:embedding:{repo}
+Value: {model: "voyage-4-large", version: "2026-01"}
+```
+
+---
+
+## Cross-Repository Search
+
+Default: search current repository only (inferred from working directory).
+
+Cross-repo search requires explicit `repo: "all"` parameter.
+
+**Rationale:** r3 (JS/TS) and m32rimm (Python) are different tech stacks with different patterns. Cross-repo search is a deliberate action, not a default.
+
+**Behavior:**
+
+```json
+// From within ~/repos/m32rimm
+{"query": "auth handler"}
+// → Searches m32rimm only
+
+{"query": "auth handler", "repo": "all"}
+// → Searches m32rimm and r3
+
+{"query": "auth handler", "repo": "r3"}
+// → Searches r3 only (even if cwd is m32rimm)
+```
+
+**Response includes repo context:**
+
+```json
+{
+  "results": [
+    {"file_path": "...", "repo": "m32rimm", ...},
+    {"file_path": "...", "repo": "r3", ...}
+  ],
+  "searched_repos": ["m32rimm", "r3"]
+}
+```
