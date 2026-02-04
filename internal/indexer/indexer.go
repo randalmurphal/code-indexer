@@ -247,10 +247,31 @@ func (idx *Indexer) IndexWithOptions(ctx context.Context, repoPath string, repoC
 		}
 	}
 
+	// Store symbols in graph database (needed for CALLS/EXTENDS relationships)
+	if opts.GraphStore != nil && len(allSymbols) > 0 {
+		idx.logger.Info("storing symbols in graph", "count", len(allSymbols))
+		for _, sym := range allSymbols {
+			graphSym := graph.Symbol{
+				Name:      sym.Name,
+				Kind:      string(sym.Kind),
+				Repo:      repoCfg.Name,
+				FilePath:  sym.FilePath,
+				StartLine: sym.StartLine,
+				EndLine:   sym.EndLine,
+				Signature: sym.Signature,
+			}
+			if err := opts.GraphStore.UpsertSymbol(ctx, graphSym); err != nil {
+				idx.logger.Debug("failed to store symbol", "name", sym.Name, "error", err)
+			}
+		}
+	}
+
 	// Store relationships in graph database
 	if opts.GraphStore != nil && len(allRelationships) > 0 {
 		idx.logger.Info("storing relationships in graph", "count", len(allRelationships))
-		idx.storeRelationships(ctx, opts.GraphStore, repoCfg.Name, allRelationships, allSymbols)
+		// Build module path -> file path map for resolving imports
+		moduleToFile := idx.buildModulePathMap(filesToUpdate)
+		idx.storeRelationships(ctx, opts.GraphStore, repoCfg.Name, allRelationships, allSymbols, moduleToFile)
 	}
 
 	return result, nil
@@ -411,8 +432,46 @@ func computeFileHash(content []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// buildModulePathMap creates a mapping from Python module paths to file paths.
+// e.g., "fisio.common.utils" -> "fisio/fisio/common/utils.py"
+func (idx *Indexer) buildModulePathMap(files []graph.File) map[string]string {
+	moduleMap := make(map[string]string)
+
+	for _, f := range files {
+		// Only process Python files
+		if !strings.HasSuffix(f.Path, ".py") {
+			continue
+		}
+
+		// Convert file path to module path
+		// e.g., "fisio/fisio/common/utils.py" -> "fisio.common.utils"
+		modulePath := strings.TrimSuffix(f.Path, ".py")
+		modulePath = strings.TrimSuffix(modulePath, "/__init__")
+		modulePath = strings.ReplaceAll(modulePath, "/", ".")
+
+		// Also handle duplicated prefixes like fisio/fisio -> fisio
+		parts := strings.Split(modulePath, ".")
+		if len(parts) >= 2 && parts[0] == parts[1] {
+			modulePath = strings.Join(parts[1:], ".")
+		}
+
+		moduleMap[modulePath] = f.Path
+
+		// Also map without the duplicated prefix if present
+		// e.g., both "fisio.fisio.common" and "fisio.common" -> same file
+		fullPath := strings.TrimSuffix(f.Path, ".py")
+		fullPath = strings.TrimSuffix(fullPath, "/__init__")
+		fullPath = strings.ReplaceAll(fullPath, "/", ".")
+		if fullPath != modulePath {
+			moduleMap[fullPath] = f.Path
+		}
+	}
+
+	return moduleMap
+}
+
 // storeRelationships stores extracted relationships in Neo4j.
-func (idx *Indexer) storeRelationships(ctx context.Context, graphStore *graph.Neo4jStore, repo string, relationships []parser.Relationship, symbols []parser.Symbol) {
+func (idx *Indexer) storeRelationships(ctx context.Context, graphStore *graph.Neo4jStore, repo string, relationships []parser.Relationship, symbols []parser.Symbol, moduleToFile map[string]string) {
 	// Build symbol lookup map for resolving relationships
 	symbolMap := make(map[string]parser.Symbol)
 	for _, sym := range symbols {
@@ -425,9 +484,16 @@ func (idx *Indexer) storeRelationships(ctx context.Context, graphStore *graph.Ne
 
 		switch rel.Kind {
 		case parser.RelationshipImports:
-			// For imports, we need to resolve the module path to a file path
-			// This is a best-effort operation since the target may be external
-			err = graphStore.CreateImportRelationship(ctx, repo, rel.SourceFile, rel.TargetPath)
+			// Resolve module path to file path
+			targetFile, exists := moduleToFile[rel.TargetPath]
+			if !exists {
+				// Try with __init__ suffix for package imports
+				targetFile, exists = moduleToFile[rel.TargetPath+".__init__"]
+			}
+			if exists {
+				err = graphStore.CreateImportRelationship(ctx, repo, rel.SourceFile, targetFile)
+			}
+			// Skip external/unresolved imports silently
 
 		case parser.RelationshipCalls:
 			// Create CALLS relationship between symbols

@@ -158,5 +158,11 @@ func parseModulePath(modulePath string) (root, sub string) {
 func generateChunkID(repo, filePath, symbolName string, startLine int) string {
 	data := fmt.Sprintf("%s:%s:%s:%d", repo, filePath, symbolName, startLine)
 	hash := sha256.Sum256([]byte(data))
-	return fmt.Sprintf("%x", hash[:8])
+	// Format as UUID (8-4-4-4-12 hex format) using first 16 bytes of hash
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		hash[0:4],
+		hash[4:6],
+		hash[6:8],
+		hash[8:10],
+		hash[10:16])
 }

@@ -126,8 +126,13 @@ func TestGenerateChunkID(t *testing.T) {
 	id3 := generateChunkID("repo", "file.py", "func", 11)
 	assert.NotEqual(t, id1, id3)
 
-	// ID should be 16 hex chars (8 bytes)
-	assert.Len(t, id1, 16)
+	// ID should be UUID format (8-4-4-4-12 = 36 chars)
+	assert.Len(t, id1, 36)
+	// Verify UUID format with hyphens at correct positions
+	assert.Equal(t, '-', rune(id1[8]))
+	assert.Equal(t, '-', rune(id1[13]))
+	assert.Equal(t, '-', rune(id1[18]))
+	assert.Equal(t, '-', rune(id1[23]))
 }
 
 func TestChunkTokenEstimate(t *testing.T) {

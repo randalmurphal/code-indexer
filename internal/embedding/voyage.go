@@ -57,8 +57,28 @@ func (c *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, nil
 	}
 
+	// Filter out empty strings and track their positions
+	var filteredTexts []string
+	emptyIndices := make(map[int]bool)
+	for i, t := range texts {
+		if t == "" {
+			emptyIndices[i] = true
+		} else {
+			filteredTexts = append(filteredTexts, t)
+		}
+	}
+
+	// If all texts were empty, return zero vectors
+	if len(filteredTexts) == 0 {
+		vectors := make([][]float32, len(texts))
+		for i := range vectors {
+			vectors[i] = make([]float32, c.Dimension())
+		}
+		return vectors, nil
+	}
+
 	reqBody := voyageRequest{
-		Input:     texts,
+		Input:     filteredTexts,
 		Model:     c.model,
 		InputType: "document",
 	}
@@ -96,10 +116,23 @@ func (c *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	// Sort by index to ensure order matches input
+	// Build result vectors, inserting zero vectors for empty inputs
 	vectors := make([][]float32, len(texts))
-	for _, emb := range voyageResp.Data {
-		vectors[emb.Index] = emb.Embedding
+	filteredIdx := 0
+	for i := range texts {
+		if emptyIndices[i] {
+			// Empty input gets zero vector
+			vectors[i] = make([]float32, c.Dimension())
+		} else {
+			// Find matching embedding by index in filtered response
+			for _, emb := range voyageResp.Data {
+				if emb.Index == filteredIdx {
+					vectors[i] = emb.Embedding
+					break
+				}
+			}
+			filteredIdx++
+		}
 	}
 
 	return vectors, nil
