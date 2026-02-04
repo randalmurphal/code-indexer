@@ -163,3 +163,29 @@ func TestInferModulePath(t *testing.T) {
 		})
 	}
 }
+
+func TestComputeFileHash(t *testing.T) {
+	// Test that the same content produces the same hash
+	content1 := []byte("def hello():\n    return 'Hello'\n")
+	content2 := []byte("def hello():\n    return 'Hello'\n")
+	content3 := []byte("def goodbye():\n    return 'Goodbye'\n")
+
+	hash1 := computeFileHash(content1)
+	hash2 := computeFileHash(content2)
+	hash3 := computeFileHash(content3)
+
+	// Same content should produce same hash
+	require.Equal(t, hash1, hash2)
+
+	// Different content should produce different hash
+	require.NotEqual(t, hash1, hash3)
+
+	// Hash should be 64 hex characters (SHA-256 = 32 bytes = 64 hex)
+	require.Len(t, hash1, 64)
+
+	// Hash should be valid hex
+	for _, c := range hash1 {
+		require.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+			"hash should be lowercase hex")
+	}
+}

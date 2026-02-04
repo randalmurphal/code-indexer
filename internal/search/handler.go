@@ -16,6 +16,7 @@ import (
 	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
+	"github.com/randalmurphy/ai-devtools-admin/internal/graph"
 	"github.com/randalmurphy/ai-devtools-admin/internal/mcp"
 	"github.com/randalmurphy/ai-devtools-admin/internal/metrics"
 	"github.com/randalmurphy/ai-devtools-admin/internal/store"
@@ -26,6 +27,7 @@ type Handler struct {
 	config        *config.Config
 	embedder      *embedding.VoyageClient
 	store         *store.QdrantStore
+	graphStore    *graph.Neo4jStore
 	cache         *cache.RedisCache
 	metrics       *metrics.Logger
 	classifier    *Classifier
@@ -62,10 +64,31 @@ func NewHandler(cfg *config.Config, voyageKey string, logger *slog.Logger) (*Han
 		metricsLogger, _ = metrics.NewLogger(metricsPath)
 	}
 
+	// Initialize Neo4j graph store if configured
+	var graphStore *graph.Neo4jStore
+	if cfg.Storage.Neo4jURL != "" {
+		// Try to connect to Neo4j (optional - graph expansion won't work without it)
+		neo4jUser := os.Getenv("NEO4J_USER")
+		if neo4jUser == "" {
+			neo4jUser = "neo4j"
+		}
+		neo4jPass := os.Getenv("NEO4J_PASSWORD")
+
+		if neo4jPass != "" {
+			graphStore, err = graph.NewNeo4jStore(cfg.Storage.Neo4jURL, neo4jUser, neo4jPass)
+			if err != nil {
+				logger.Warn("Neo4j unavailable, graph expansion disabled", "error", err)
+			}
+		} else {
+			logger.Warn("NEO4J_PASSWORD not set, graph expansion disabled")
+		}
+	}
+
 	return &Handler{
 		config:        cfg,
 		embedder:      embedder,
 		store:         qdrantStore,
+		graphStore:    graphStore,
 		cache:         queryCache,
 		metrics:       metricsLogger,
 		classifier:    NewClassifier(),
@@ -81,6 +104,9 @@ func (h *Handler) Close() error {
 	}
 	if h.store != nil {
 		h.store.Close()
+	}
+	if h.graphStore != nil {
+		h.graphStore.Close(context.Background())
 	}
 	if h.metrics != nil {
 		h.metrics.Close()
@@ -274,6 +300,11 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
+	// Apply graph expansion if enabled and graph store is available
+	if strategy.UseGraphExpansion && h.graphStore != nil && len(results) > 0 {
+		results = h.expandWithGraph(ctx, results, repo, strategy.GraphDepth, fetchLimit)
+	}
+
 	// Convert chunks to search results for pagination
 	searchResults := make([]SearchResult, len(results))
 	for i, c := range results {
@@ -404,40 +435,6 @@ func (h *Handler) searchByPattern(ctx context.Context, query string, filter map[
 	return h.searchSemantic(ctx, query, filter, limit)
 }
 
-func (h *Handler) formatSearchResponse(query string, results []chunk.Chunk, repo string) string {
-	return h.formatSearchResponseWithType(query, QueryTypeConcept, results, repo)
-}
-
-func (h *Handler) formatSearchResponseWithType(query string, queryType QueryType, results []chunk.Chunk, repo string) string {
-	if len(results) == 0 {
-		return h.formatEmptyResponse(query, repo)
-	}
-
-	response := SearchResponse{
-		QueryType:  string(queryType),
-		Results:    make([]SearchResult, len(results)),
-		TotalCount: len(results),
-		HasMore:    false,
-	}
-
-	for i, c := range results {
-		response.Results[i] = SearchResult{
-			FilePath:   c.FilePath,
-			Module:     c.ModulePath,
-			SymbolName: c.SymbolName,
-			Kind:       c.Kind,
-			StartLine:  c.StartLine,
-			EndLine:    c.EndLine,
-			Content:    c.Content,
-			Docstring:  c.Docstring,
-			IsTest:     c.IsTest,
-		}
-	}
-
-	data, _ := json.MarshalIndent(response, "", "  ")
-	return string(data)
-}
-
 func (h *Handler) formatEmptyResponse(query, repo string) string {
 	// Generate suggestions based on query
 	suggestions := h.suggestionGen.Generate(query)
@@ -448,16 +445,90 @@ func (h *Handler) formatEmptyResponse(query, repo string) string {
 }
 
 func (h *Handler) getRelevantContext(ctx context.Context) (*mcp.ReadResourceResult, error) {
-	// Placeholder for conversation-aware context
+	// Get context from current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return h.emptyRelevantContext(), nil
+	}
+
+	// Infer repo from cwd
+	repo := h.inferRepo()
+	if repo == "" {
+		return h.emptyRelevantContext(), nil
+	}
+
+	// Find relevant files based on current directory
+	var suggestions []string
+
+	// Try to use graph to find related files based on cwd
+	if h.graphStore != nil {
+		// Get relative path within repo
+		homeDir, _ := os.UserHomeDir()
+		repoPath := filepath.Join(homeDir, "repos", repo)
+		relCwd, _ := filepath.Rel(repoPath, cwd)
+
+		// Find files in or near current directory
+		relatedFiles, err := h.graphStore.FindRelatedFiles(ctx, repo, relCwd, 10)
+		if err == nil && len(relatedFiles) > 0 {
+			for _, f := range relatedFiles {
+				suggestions = append(suggestions, fmt.Sprintf("- `%s` (related via imports/calls)", f.Path))
+			}
+		}
+	}
+
+	// If no graph results, use semantic search based on directory name
+	if len(suggestions) == 0 {
+		dirName := filepath.Base(cwd)
+		if dirName != "." && dirName != repo {
+			results, err := h.searchSemantic(ctx, dirName, map[string]interface{}{"repo": repo}, 5)
+			if err == nil {
+				for _, c := range results {
+					suggestions = append(suggestions, fmt.Sprintf("- `%s:%d-%d` %s (%s)",
+						c.FilePath, c.StartLine, c.EndLine, c.SymbolName, c.Kind))
+				}
+			}
+		}
+	}
+
+	if len(suggestions) == 0 {
+		return h.emptyRelevantContext(), nil
+	}
+
+	// Format response
+	text := fmt.Sprintf("# Relevant Context for %s\n\n", repo)
+	text += fmt.Sprintf("Based on current directory: `%s`\n\n", cwd)
+	text += "## Related Code\n\n"
+	for _, s := range suggestions {
+		text += s + "\n"
+	}
+	text += "\n*Use `search_code` for more specific queries.*"
+
+	// Log the context injection if metrics available
+	if h.metrics != nil {
+		h.metrics.LogContextInject(cwd, len(suggestions), 0.7)
+	}
+
 	return &mcp.ReadResourceResult{
 		Contents: []mcp.ResourceContent{
 			{
 				URI:      "codeindex://relevant",
 				MimeType: "text/markdown",
-				Text:     "No contextual suggestions available. Use search_code tool for explicit searches.",
+				Text:     text,
 			},
 		},
 	}, nil
+}
+
+func (h *Handler) emptyRelevantContext() *mcp.ReadResourceResult {
+	return &mcp.ReadResourceResult{
+		Contents: []mcp.ResourceContent{
+			{
+				URI:      "codeindex://relevant",
+				MimeType: "text/markdown",
+				Text:     "No contextual suggestions available. Use `search_code` tool for explicit searches.",
+			},
+		},
+	}
 }
 
 func (h *Handler) inferRepo() string {
@@ -481,6 +552,80 @@ func (h *Handler) inferRepo() string {
 	}
 
 	return ""
+}
+
+// expandWithGraph expands search results using graph relationships.
+// For each result, it finds related symbols via CALLS, EXTENDS, and IMPORTS
+// relationships and adds them to the result set.
+func (h *Handler) expandWithGraph(ctx context.Context, results []chunk.Chunk, repo string, depth int, limit int) []chunk.Chunk {
+	if h.graphStore == nil || len(results) == 0 {
+		return results
+	}
+
+	// Collect symbol names from results
+	var symbolNames []string
+	seenSymbols := make(map[string]bool)
+	for _, c := range results {
+		if c.SymbolName != "" && !seenSymbols[c.SymbolName] {
+			symbolNames = append(symbolNames, c.SymbolName)
+			seenSymbols[c.SymbolName] = true
+		}
+	}
+
+	if len(symbolNames) == 0 {
+		return results
+	}
+
+	// Expand from the found symbols
+	expandedSymbols, err := h.graphStore.ExpandFromSymbols(ctx, repo, symbolNames, depth, limit)
+	if err != nil {
+		h.logger.Warn("graph expansion failed", "error", err)
+		return results
+	}
+
+	if len(expandedSymbols) == 0 {
+		return results
+	}
+
+	// Look up chunks for expanded symbols
+	seenChunks := make(map[string]bool)
+	for _, c := range results {
+		seenChunks[c.ID] = true
+	}
+
+	for _, sym := range expandedSymbols {
+		// Skip symbols we already have
+		if seenSymbols[sym.Name] {
+			continue
+		}
+
+		// Search for the symbol's chunk
+		filter := map[string]interface{}{
+			"repo":        repo,
+			"symbol_name": sym.Name,
+		}
+
+		chunks, err := h.store.SearchByFilter(ctx, "chunks", filter, 1)
+		if err != nil || len(chunks) == 0 {
+			continue
+		}
+
+		// Add if not already in results
+		c := chunks[0]
+		if !seenChunks[c.ID] {
+			// Mark as expanded result with lower score
+			c.Score = 0.5 // Lower than direct results
+			results = append(results, c)
+			seenChunks[c.ID] = true
+		}
+	}
+
+	// Re-apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results
 }
 
 // SearchResponse is the structured search result.

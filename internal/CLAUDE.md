@@ -11,6 +11,7 @@ Core implementation packages for code-indexer. Each package has single responsib
 | `chunk` | Chunk model + extraction | `chunk.go`, `extractor.go`, `hierarchy.go` |
 | `embedding` | Vector generation | `voyage.go` |
 | `store` | Qdrant storage | `qdrant.go` |
+| `graph` | Neo4j relationships | `neo4j.go` |
 | `indexer` | Pipeline orchestration | `indexer.go`, `walker.go`, `module.go` |
 | `search` | Query handling | `handler.go`, `classifier.go`, `pagination.go` |
 | `pattern` | Pattern detection | `detector.go` |
@@ -32,11 +33,13 @@ cmd/code-indexer
         ├── embedding
         ├── pattern
         ├── docs
-        └── store
+        ├── store
+        └── graph
 
 cmd/code-index-mcp
     └── search
         ├── store
+        ├── graph
         ├── embedding
         ├── cache
         ├── metrics

@@ -2,16 +2,20 @@ package indexer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/docs"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
+	"github.com/randalmurphy/ai-devtools-admin/internal/graph"
 	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
 	"github.com/randalmurphy/ai-devtools-admin/internal/pattern"
 	"github.com/randalmurphy/ai-devtools-admin/internal/store"
@@ -25,6 +29,7 @@ type Indexer struct {
 	embedder        *embedding.VoyageClient
 	store           *store.QdrantStore
 	patternDetector *pattern.Detector
+	moduleResolver  *ModuleResolver // Initialized per-repo during Index
 	logger          *slog.Logger
 }
 
@@ -42,9 +47,13 @@ func NewIndexer(cfg *config.Config, voyageKey string) (*Indexer, error) {
 		SimilarityThreshold: 0.8,
 	})
 
+	// Create extractor with hierarchical chunking enabled
+	extractor := chunk.NewExtractor()
+	extractor.SetHierarchicalChunking(true)
+
 	return &Indexer{
 		config:          cfg,
-		extractor:       chunk.NewExtractor(),
+		extractor:       extractor,
 		embedder:        embedder,
 		store:           qdrantStore,
 		patternDetector: patternDetector,
@@ -55,14 +64,29 @@ func NewIndexer(cfg *config.Config, voyageKey string) (*Indexer, error) {
 // IndexResult contains statistics from an indexing run.
 type IndexResult struct {
 	FilesProcessed int
+	FilesSkipped   int // For incremental: files unchanged
 	ChunksCreated  int
 	Errors         []error
+}
+
+// IndexOptions configures the indexing behavior.
+type IndexOptions struct {
+	Incremental bool              // Only index changed files
+	GraphStore  *graph.Neo4jStore // For incremental: store/retrieve file hashes
 }
 
 // Index processes a repository, extracting code chunks, generating embeddings,
 // and storing them in the vector database.
 func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.RepoConfig) (*IndexResult, error) {
+	return idx.IndexWithOptions(ctx, repoPath, repoCfg, IndexOptions{})
+}
+
+// IndexWithOptions processes a repository with configurable options.
+func (idx *Indexer) IndexWithOptions(ctx context.Context, repoPath string, repoCfg *config.RepoConfig, opts IndexOptions) (*IndexResult, error) {
 	result := &IndexResult{}
+
+	// Initialize module resolver for this repo
+	idx.moduleResolver = NewModuleResolver(repoPath, repoCfg)
 
 	// Ensure collection exists
 	collectionName := "chunks"
@@ -70,14 +94,27 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 		return nil, fmt.Errorf("failed to ensure collection: %w", err)
 	}
 
+	// Get existing file hashes for incremental indexing
+	var existingHashes map[string]string
+	if opts.Incremental && opts.GraphStore != nil {
+		var err error
+		existingHashes, err = opts.GraphStore.GetAllFileHashes(ctx, repoCfg.Name)
+		if err != nil {
+			idx.logger.Warn("failed to get existing hashes, falling back to full index", "error", err)
+			existingHashes = nil
+		}
+	}
+
 	// Walk files and extract chunks, collecting symbols for pattern detection
 	walker := NewWalker(repoCfg.Include, repoCfg.Exclude)
 	var allChunks []chunk.Chunk
 	var allSymbols []parser.Symbol
+	var allRelationships []parser.Relationship
+
+	// Track files to update in graph store
+	var filesToUpdate []graph.File
 
 	err := walker.Walk(repoPath, func(path string) error {
-		idx.logger.Info("processing file", "path", path)
-
 		source, err := os.ReadFile(path)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("read %s: %w", path, err))
@@ -85,9 +122,23 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 		}
 
 		relPath, _ := filepath.Rel(repoPath, path)
-		modulePath := inferModulePath(relPath, repoCfg)
 
-		chunks, err := idx.extractor.Extract(source, relPath, repoCfg.Name, modulePath)
+		// Check if file has changed (incremental mode)
+		currentHash := computeFileHash(source)
+		if opts.Incremental && existingHashes != nil {
+			if oldHash, exists := existingHashes[relPath]; exists && oldHash == currentHash {
+				// File unchanged, skip indexing
+				idx.logger.Debug("skipping unchanged file", "path", relPath)
+				result.FilesSkipped++
+				return nil
+			}
+		}
+
+		idx.logger.Info("processing file", "path", relPath)
+
+		modulePath, moduleRoot, _ := idx.moduleResolver.Resolve(relPath)
+
+		extractResult, err := idx.extractor.ExtractWithRelationships(source, relPath, repoCfg.Name, modulePath)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("extract %s: %w", path, err))
 			return nil
@@ -97,8 +148,20 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 		symbols := idx.extractSymbols(source, relPath)
 		allSymbols = append(allSymbols, symbols...)
 
-		allChunks = append(allChunks, chunks...)
+		allChunks = append(allChunks, extractResult.Chunks...)
+		allRelationships = append(allRelationships, extractResult.Relationships...)
 		result.FilesProcessed++
+
+		// Track file for graph update
+		if opts.GraphStore != nil {
+			filesToUpdate = append(filesToUpdate, graph.File{
+				Path:        relPath,
+				Repo:        repoCfg.Name,
+				ModuleRoot:  moduleRoot,
+				Hash:        currentHash,
+				LastIndexed: time.Now(),
+			})
+		}
 
 		return nil
 	})
@@ -173,6 +236,22 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 	}
 
 	result.ChunksCreated = len(allChunks)
+
+	// Update graph store with file hashes (for incremental indexing)
+	if opts.GraphStore != nil && len(filesToUpdate) > 0 {
+		idx.logger.Info("updating file hashes in graph", "files", len(filesToUpdate))
+		for _, file := range filesToUpdate {
+			if err := opts.GraphStore.UpsertFile(ctx, file); err != nil {
+				idx.logger.Warn("failed to update file hash", "path", file.Path, "error", err)
+			}
+		}
+	}
+
+	// Store relationships in graph database
+	if opts.GraphStore != nil && len(allRelationships) > 0 {
+		idx.logger.Info("storing relationships in graph", "count", len(allRelationships))
+		idx.storeRelationships(ctx, opts.GraphStore, repoCfg.Name, allRelationships, allSymbols)
+	}
 
 	return result, nil
 }
@@ -324,4 +403,71 @@ func (idx *Indexer) indexNavigationDocs(repoPath, repo string) []chunk.Chunk {
 	}
 
 	return allChunks
+}
+
+// computeFileHash returns a SHA-256 hash of the file content.
+func computeFileHash(content []byte) string {
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:])
+}
+
+// storeRelationships stores extracted relationships in Neo4j.
+func (idx *Indexer) storeRelationships(ctx context.Context, graphStore *graph.Neo4jStore, repo string, relationships []parser.Relationship, symbols []parser.Symbol) {
+	// Build symbol lookup map for resolving relationships
+	symbolMap := make(map[string]parser.Symbol)
+	for _, sym := range symbols {
+		// Key by name for lookup
+		symbolMap[sym.Name] = sym
+	}
+
+	for _, rel := range relationships {
+		var err error
+
+		switch rel.Kind {
+		case parser.RelationshipImports:
+			// For imports, we need to resolve the module path to a file path
+			// This is a best-effort operation since the target may be external
+			err = graphStore.CreateImportRelationship(ctx, repo, rel.SourceFile, rel.TargetPath)
+
+		case parser.RelationshipCalls:
+			// Create CALLS relationship between symbols
+			if targetSym, exists := symbolMap[rel.TargetName]; exists {
+				caller := graph.Symbol{
+					Name:      rel.SourceName,
+					FilePath:  rel.SourceFile,
+					Repo:      repo,
+					StartLine: rel.SourceLine,
+				}
+				callee := graph.Symbol{
+					Name:      targetSym.Name,
+					FilePath:  targetSym.FilePath,
+					Repo:      repo,
+					StartLine: targetSym.StartLine,
+				}
+				err = graphStore.CreateCallRelationship(ctx, repo, caller, callee)
+			}
+
+		case parser.RelationshipExtends:
+			// Create EXTENDS relationship between symbols
+			if targetSym, exists := symbolMap[rel.TargetName]; exists {
+				child := graph.Symbol{
+					Name:      rel.SourceName,
+					FilePath:  rel.SourceFile,
+					Repo:      repo,
+					StartLine: rel.SourceLine,
+				}
+				parent := graph.Symbol{
+					Name:      targetSym.Name,
+					FilePath:  targetSym.FilePath,
+					Repo:      repo,
+					StartLine: targetSym.StartLine,
+				}
+				err = graphStore.CreateExtendsRelationship(ctx, repo, child, parent)
+			}
+		}
+
+		if err != nil {
+			idx.logger.Debug("failed to store relationship", "kind", rel.Kind, "source", rel.SourceFile, "error", err)
+		}
+	}
 }

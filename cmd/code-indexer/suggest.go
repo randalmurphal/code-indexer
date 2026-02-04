@@ -12,6 +12,7 @@ import (
 	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
+	"github.com/randalmurphy/ai-devtools-admin/internal/graph"
 	"github.com/randalmurphy/ai-devtools-admin/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -86,34 +87,47 @@ func runSuggestContext(cmd *cobra.Command, args []string) error {
 		return nil // Silent fail
 	}
 
-	// Search for similar chunks
-	related, err := qdrantStore.Search(ctx, "chunks", vectors[0], suggestLimit*5, nil)
-	if err != nil {
-		return nil // Silent fail
-	}
-
 	// Deduplicate by file and exclude current file
 	seen := make(map[string]bool)
 	seen[absPath] = true
 	seen[filePath] = true
-
 	suggestions := []relatedFile{}
-	for _, c := range related {
-		normalizedPath := normalizePath(c.FilePath)
-		if seen[normalizedPath] || seen[c.FilePath] {
+
+	// First, try to find related files via graph relationships
+	graphRelated := findRelatedFilesViaGraph(ctx, cfg, filePath, suggestLimit)
+	for _, rel := range graphRelated {
+		normalizedPath := normalizePath(rel.Path)
+		if seen[normalizedPath] || seen[rel.Path] {
 			continue
 		}
 		seen[normalizedPath] = true
-		seen[c.FilePath] = true
+		seen[rel.Path] = true
+		suggestions = append(suggestions, rel)
+	}
 
-		reason := inferRelationReason(absPath, c)
-		suggestions = append(suggestions, relatedFile{
-			Path:   c.FilePath,
-			Reason: reason,
-		})
+	// If we still need more suggestions, use semantic search
+	if len(suggestions) < suggestLimit {
+		// Search for similar chunks
+		related, err := qdrantStore.Search(ctx, "chunks", vectors[0], suggestLimit*5, nil)
+		if err == nil {
+			for _, c := range related {
+				normalizedPath := normalizePath(c.FilePath)
+				if seen[normalizedPath] || seen[c.FilePath] {
+					continue
+				}
+				seen[normalizedPath] = true
+				seen[c.FilePath] = true
 
-		if len(suggestions) >= suggestLimit {
-			break
+				reason := inferRelationReason(absPath, c)
+				suggestions = append(suggestions, relatedFile{
+					Path:   c.FilePath,
+					Reason: reason,
+				})
+
+				if len(suggestions) >= suggestLimit {
+					break
+				}
+			}
 		}
 	}
 
@@ -141,6 +155,58 @@ func normalizePath(p string) string {
 		return p
 	}
 	return abs
+}
+
+// findRelatedFilesViaGraph uses Neo4j to find files related via imports, calls, or extends.
+func findRelatedFilesViaGraph(ctx context.Context, cfg *config.Config, filePath string, limit int) []relatedFile {
+	if cfg.Storage.Neo4jURL == "" {
+		return nil
+	}
+
+	neo4jUser := os.Getenv("NEO4J_USER")
+	if neo4jUser == "" {
+		neo4jUser = "neo4j"
+	}
+	neo4jPass := os.Getenv("NEO4J_PASSWORD")
+	if neo4jPass == "" {
+		return nil // No password configured
+	}
+
+	graphStore, err := graph.NewNeo4jStore(cfg.Storage.Neo4jURL, neo4jUser, neo4jPass)
+	if err != nil {
+		return nil // Silent fail - Neo4j not available
+	}
+	defer graphStore.Close(ctx)
+
+	// Infer repo from file path (assumes ~/repos/<repo>/... structure)
+	repo := inferRepoFromPath(filePath)
+	if repo == "" {
+		return nil
+	}
+
+	// Make path relative to repo
+	homeDir, _ := os.UserHomeDir()
+	repoPath := filepath.Join(homeDir, "repos", repo)
+	relPath, err := filepath.Rel(repoPath, filePath)
+	if err != nil {
+		return nil
+	}
+
+	// Find related files via graph
+	related, err := graphStore.FindRelatedFiles(ctx, repo, relPath, limit)
+	if err != nil {
+		return nil
+	}
+
+	var results []relatedFile
+	for _, f := range related {
+		results = append(results, relatedFile{
+			Path:   f.Path,
+			Reason: "imports/calls relationship",
+		})
+	}
+
+	return results
 }
 
 func inferRelationReason(sourcePath string, target chunk.Chunk) string {

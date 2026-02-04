@@ -41,8 +41,23 @@ func (e *Extractor) SetHierarchicalChunking(enabled bool) {
 	e.hierarchical = enabled
 }
 
+// ExtractResult contains chunks and relationships from extraction.
+type ExtractResult struct {
+	Chunks        []Chunk
+	Relationships []parser.Relationship
+}
+
 // Extract parses code and returns chunks.
 func (e *Extractor) Extract(source []byte, filePath, repo, modulePath string) ([]Chunk, error) {
+	result, err := e.ExtractWithRelationships(source, filePath, repo, modulePath)
+	if err != nil {
+		return nil, err
+	}
+	return result.Chunks, nil
+}
+
+// ExtractWithRelationships parses code and returns both chunks and relationships.
+func (e *Extractor) ExtractWithRelationships(source []byte, filePath, repo, modulePath string) (*ExtractResult, error) {
 	lang, ok := parser.DetectLanguage(filePath)
 	if !ok {
 		return nil, fmt.Errorf("unsupported file type: %s", filePath)
@@ -53,16 +68,21 @@ func (e *Extractor) Extract(source []byte, filePath, repo, modulePath string) ([
 		return nil, err
 	}
 
-	symbols, err := p.Parse(source, filePath)
+	// Use ParseWithRelationships to get both symbols and relationships
+	parseResult, err := p.ParseWithRelationships(source, filePath)
 	if err != nil {
 		return nil, err
 	}
+
+	symbols := parseResult.Symbols
+	relationships := parseResult.Relationships
 
 	isTest := e.isTestFile(filePath)
 
 	// Use hierarchical chunking if enabled
 	if e.hierarchical {
-		return e.hierarchicalChunker.ChunkSymbols(symbols, filePath, repo, modulePath, isTest), nil
+		chunks := e.hierarchicalChunker.ChunkSymbols(symbols, filePath, repo, modulePath, isTest)
+		return &ExtractResult{Chunks: chunks, Relationships: relationships}, nil
 	}
 
 	// Standard chunking
@@ -113,7 +133,7 @@ func (e *Extractor) Extract(source []byte, filePath, repo, modulePath string) ([
 		chunks = append(chunks, chunk)
 	}
 
-	return chunks, nil
+	return &ExtractResult{Chunks: chunks, Relationships: relationships}, nil
 }
 
 func (e *Extractor) isTestFile(filePath string) bool {

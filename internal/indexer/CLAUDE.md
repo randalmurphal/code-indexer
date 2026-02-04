@@ -10,18 +10,40 @@ Coordinate the full indexing pipeline: walk files → extract chunks → generat
 
 | Type | Description | Location |
 |------|-------------|----------|
-| `Indexer` | Pipeline coordinator | `indexer.go:19-25` |
+| `Indexer` | Pipeline coordinator | `indexer.go:26-34` |
 | `Walker` | File traversal | `walker.go:12-15` |
-| `IndexResult` | Indexing stats | `indexer.go:46-50` |
-| `ModuleInferrer` | Module path resolver | `module.go:10-14` |
+| `IndexResult` | Indexing stats | `indexer.go:65-70` |
+| `IndexOptions` | Indexing options | `indexer.go:73-76` |
+| `ModuleResolver` | Module path resolver | `module.go:10-14` |
 
 ## Usage
 
 ```go
 idx, err := indexer.NewIndexer(cfg, voyageAPIKey)
+
+// Full indexing
 result, err := idx.Index(ctx, "/path/to/repo", repoCfg)
-// result.FilesProcessed, result.ChunksCreated, result.Errors
+
+// Incremental indexing (only changed files)
+result, err := idx.IndexWithOptions(ctx, "/path/to/repo", repoCfg, indexer.IndexOptions{
+    Incremental: true,
+    GraphStore:  graphStore, // Neo4j for file hashes
+})
+// result.FilesProcessed, result.FilesSkipped, result.ChunksCreated, result.Errors
 ```
+
+## Incremental Indexing
+
+Uses SHA-256 file hashes stored in Neo4j to skip unchanged files:
+
+1. Fetch existing hashes: `graphStore.GetAllFileHashes(ctx, repo)`
+2. For each file, compute hash with `computeFileHash(content)`
+3. Skip if hash matches stored value
+4. After indexing, update Neo4j: `graphStore.UpsertFile(ctx, file)`
+
+**CLI**: `code-indexer index <repo> --incremental`
+
+**Requirements**: Neo4j configured with `NEO4J_PASSWORD` env var
 
 ## Walker
 
@@ -87,3 +109,5 @@ Config-based: Uses `modules` map in `.ai-devtools.yaml` for descriptions.
 3. **Collection name** - Hardcoded to `"chunks"`
 4. **Batch sizes** - 64 for embeddings (API limit 128), 100 for Qdrant
 5. **Nav docs boosted** - 1.5x retrieval weight ensures docs surface in searches
+6. **Incremental requires Neo4j** - Falls back to full index if Neo4j unavailable
+7. **Hierarchical chunking enabled** - Large classes (>50 methods) split into summary + method chunks

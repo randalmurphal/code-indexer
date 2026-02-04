@@ -14,13 +14,21 @@ Extract semantic symbols (functions, classes, methods) from source code using tr
 | `SymbolKind` | Symbol type enum | `parser.go:19-26` |
 | `Symbol` | Extracted code symbol | `parser.go:28-38` |
 | `Parser` | Tree-sitter wrapper | `parser.go:40-45` |
+| `RelationshipKind` | Relationship type enum | `relationships.go:11-16` |
+| `Relationship` | Code relationship | `relationships.go:19-27` |
+| `ParseResult` | Symbols + relationships | `relationships.go:30-33` |
 
 ## Usage
 
 ```go
+// Basic symbol extraction
 p, err := parser.NewParser(parser.LanguagePython)
 symbols, err := p.Parse(sourceCode, "file.py")
-// symbols contains functions, classes, methods with content + metadata
+
+// With relationship extraction
+result, err := p.ParseWithRelationships(sourceCode, "file.py")
+// result.Symbols - functions, classes, methods
+// result.Relationships - imports, calls, extends
 ```
 
 ## Supported Languages
@@ -58,9 +66,18 @@ symbols, err := p.Parse(sourceCode, "file.py")
 - Methods: `method_definition` inside `class_body`
 - Arrow functions: Not yet extracted (TODO)
 
+## Relationship Extraction
+
+| Kind | Source | Target | Description |
+|------|--------|--------|-------------|
+| `imports` | File | Module path | Import/require statements |
+| `calls` | Symbol | Symbol name | Function/method calls |
+| `extends` | Class | Base class | Class inheritance |
+
 ## Gotchas
 
 1. **Line numbers are 1-indexed** (tree-sitter uses 0-indexed rows)
 2. **TypeScript uses JS parser** - TS-specific syntax (interfaces, type annotations) not extracted
 3. **Nested functions** - Parent field tracks nesting for Python
 4. **Cursor management** - Always `defer cursor.Close()` to prevent memory leaks
+5. **Relationship targets** - CALLS/EXTENDS targets are names only, resolution happens at graph level

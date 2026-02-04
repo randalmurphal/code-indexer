@@ -33,13 +33,26 @@ Classification order in `classifier.go:50-85`:
 ## Search Flow
 
 ```
-Query → Classify → Route → Search → Paginate → Format
-                     │
-    ┌────────────────┼────────────────┐
-    ↓                ↓                ↓
- Symbol          Semantic         Pattern
-(exact match)   (vector sim)   (filter kind)
+Query → Classify → Route → Search → Graph Expand → Paginate → Format
+                     │                    │
+    ┌────────────────┼────────────────┐   │
+    ↓                ↓                ↓   ↓
+ Symbol          Semantic         Pattern Neo4j
+(exact match)   (vector sim)   (filter)  (relationships)
 ```
+
+## Graph Expansion
+
+When `UseGraphExpansion` is enabled in the strategy:
+
+1. Extract symbol names from initial results
+2. Query Neo4j for related symbols via CALLS/EXTENDS/IMPORTS
+3. Look up chunks for expanded symbols
+4. Merge with original results (expanded results get lower score: 0.5)
+
+Requires:
+- Neo4j configured (`NEO4J_URL`, `NEO4J_PASSWORD`)
+- Relationships indexed during code indexing
 
 ## Pagination
 

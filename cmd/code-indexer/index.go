@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
+	"github.com/randalmurphy/ai-devtools-admin/internal/graph"
 	"github.com/randalmurphy/ai-devtools-admin/internal/indexer"
 	"github.com/spf13/cobra"
 )
@@ -77,13 +78,49 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create indexer: %w", err)
 	}
 
-	// Run indexing
-	fmt.Printf("Indexing %s (%s)...\n", repoCfg.Name, absPath)
-
 	ctx := context.Background()
-	result, err := idx.Index(ctx, absPath, repoCfg)
+
+	// Connect to Neo4j for relationship storage and incremental indexing (optional)
+	var graphStore *graph.Neo4jStore
+	if globalCfg.Storage.Neo4jURL != "" {
+		neo4jUser := os.Getenv("NEO4J_USER")
+		if neo4jUser == "" {
+			neo4jUser = "neo4j"
+		}
+		neo4jPass := os.Getenv("NEO4J_PASSWORD")
+		if neo4jPass != "" {
+			graphStore, err = graph.NewNeo4jStore(globalCfg.Storage.Neo4jURL, neo4jUser, neo4jPass)
+			if err != nil {
+				fmt.Printf("Warning: Neo4j unavailable, relationships will not be stored: %v\n", err)
+			} else {
+				// Ensure schema exists for relationship storage
+				if schemaErr := graphStore.EnsureSchema(ctx); schemaErr != nil {
+					fmt.Printf("Warning: Failed to ensure Neo4j schema: %v\n", schemaErr)
+				}
+			}
+		} else if indexIncremental {
+			fmt.Printf("Warning: NEO4J_PASSWORD not set, falling back to full indexing\n")
+		}
+	}
+
+	// Run indexing
+
+	if indexIncremental {
+		fmt.Printf("Incremental indexing %s (%s)...\n", repoCfg.Name, absPath)
+	} else {
+		fmt.Printf("Indexing %s (%s)...\n", repoCfg.Name, absPath)
+	}
+
+	result, err := idx.IndexWithOptions(ctx, absPath, repoCfg, indexer.IndexOptions{
+		Incremental: indexIncremental,
+		GraphStore:  graphStore,
+	})
 	if err != nil {
 		return fmt.Errorf("indexing failed: %w", err)
+	}
+
+	if graphStore != nil {
+		graphStore.Close(ctx)
 	}
 
 	// Report results
