@@ -17,6 +17,7 @@ import (
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
 	"github.com/randalmurphy/ai-devtools-admin/internal/mcp"
+	"github.com/randalmurphy/ai-devtools-admin/internal/metrics"
 	"github.com/randalmurphy/ai-devtools-admin/internal/store"
 )
 
@@ -26,6 +27,7 @@ type Handler struct {
 	embedder *embedding.VoyageClient
 	store    *store.QdrantStore
 	cache    *cache.RedisCache
+	metrics  *metrics.Logger
 	logger   *slog.Logger
 }
 
@@ -50,11 +52,20 @@ func NewHandler(cfg *config.Config, voyageKey string, logger *slog.Logger) (*Han
 		}
 	}
 
+	// Initialize metrics logger
+	var metricsLogger *metrics.Logger
+	homeDir, _ := os.UserHomeDir()
+	metricsPath := filepath.Join(homeDir, ".local", "share", "code-index", "metrics.jsonl")
+	if err := os.MkdirAll(filepath.Dir(metricsPath), 0755); err == nil {
+		metricsLogger, _ = metrics.NewLogger(metricsPath)
+	}
+
 	return &Handler{
 		config:   cfg,
 		embedder: embedder,
 		store:    qdrantStore,
 		cache:    queryCache,
+		metrics:  metricsLogger,
 		logger:   logger,
 	}, nil
 }
@@ -66,6 +77,9 @@ func (h *Handler) Close() error {
 	}
 	if h.store != nil {
 		h.store.Close()
+	}
+	if h.metrics != nil {
+		h.metrics.Close()
 	}
 	return nil
 }
@@ -140,6 +154,8 @@ func (h *Handler) ReadResource(ctx context.Context, uri string) (*mcp.ReadResour
 }
 
 func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	startTime := time.Now()
+
 	// Parse arguments
 	query, _ := args["query"].(string)
 	if query == "" {
@@ -183,6 +199,10 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		if cached, err := h.cache.Get(ctx, cacheKey); err == nil && cached != "" {
 			if h.logger != nil {
 				h.logger.Debug("cache hit", "query", query, "repo", repo)
+			}
+			// Log metrics for cache hit
+			if h.metrics != nil {
+				h.metrics.LogSearch(query, "concept", -1, time.Since(startTime).Milliseconds(), true)
 			}
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{{Type: "text", Text: cached}},
@@ -229,6 +249,11 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		if err := h.cache.Set(ctx, cacheKey, response, ttl); err != nil {
 			h.logger.Warn("failed to cache result", "error", err)
 		}
+	}
+
+	// Log metrics for cache miss
+	if h.metrics != nil {
+		h.metrics.LogSearch(query, "concept", len(results), time.Since(startTime).Milliseconds(), false)
 	}
 
 	return &mcp.CallToolResult{
