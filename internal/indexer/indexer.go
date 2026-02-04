@@ -11,17 +11,20 @@ import (
 	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
+	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphy/ai-devtools-admin/internal/pattern"
 	"github.com/randalmurphy/ai-devtools-admin/internal/store"
 )
 
 // Indexer coordinates the indexing pipeline: file discovery, parsing,
 // embedding generation, and storage.
 type Indexer struct {
-	config    *config.Config
-	extractor *chunk.Extractor
-	embedder  *embedding.VoyageClient
-	store     *store.QdrantStore
-	logger    *slog.Logger
+	config          *config.Config
+	extractor       *chunk.Extractor
+	embedder        *embedding.VoyageClient
+	store           *store.QdrantStore
+	patternDetector *pattern.Detector
+	logger          *slog.Logger
 }
 
 // NewIndexer creates a new indexer with the given configuration.
@@ -33,12 +36,18 @@ func NewIndexer(cfg *config.Config, voyageKey string) (*Indexer, error) {
 		return nil, fmt.Errorf("failed to connect to Qdrant: %w", err)
 	}
 
+	patternDetector := pattern.NewDetector(pattern.DetectorConfig{
+		MinClusterSize:      5,
+		SimilarityThreshold: 0.8,
+	})
+
 	return &Indexer{
-		config:    cfg,
-		extractor: chunk.NewExtractor(),
-		embedder:  embedder,
-		store:     qdrantStore,
-		logger:    slog.Default(),
+		config:          cfg,
+		extractor:       chunk.NewExtractor(),
+		embedder:        embedder,
+		store:           qdrantStore,
+		patternDetector: patternDetector,
+		logger:          slog.Default(),
 	}, nil
 }
 
@@ -60,9 +69,10 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 		return nil, fmt.Errorf("failed to ensure collection: %w", err)
 	}
 
-	// Walk files and extract chunks
+	// Walk files and extract chunks, collecting symbols for pattern detection
 	walker := NewWalker(repoCfg.Include, repoCfg.Exclude)
 	var allChunks []chunk.Chunk
+	var allSymbols []parser.Symbol
 
 	err := walker.Walk(repoPath, func(path string) error {
 		idx.logger.Info("processing file", "path", path)
@@ -82,6 +92,10 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 			return nil
 		}
 
+		// Collect symbols for pattern detection
+		symbols := idx.extractSymbols(source, relPath)
+		allSymbols = append(allSymbols, symbols...)
+
 		allChunks = append(allChunks, chunks...)
 		result.FilesProcessed++
 
@@ -95,6 +109,30 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 	if len(allChunks) == 0 {
 		return result, nil
 	}
+
+	// Detect patterns and mark chunks
+	idx.logger.Info("detecting patterns", "symbols", len(allSymbols))
+	patterns := idx.patternDetector.Detect(allSymbols)
+	idx.logger.Info("patterns detected", "count", len(patterns))
+
+	// Build file->pattern mapping
+	filePatterns := make(map[string]string)
+	for _, p := range patterns {
+		for _, member := range p.Members {
+			filePatterns[member] = p.Name
+		}
+	}
+
+	// Mark chunks with their pattern
+	for i := range allChunks {
+		if patternName, ok := filePatterns[allChunks[i].FilePath]; ok {
+			allChunks[i].FollowsPattern = patternName
+		}
+	}
+
+	// Create pattern chunks
+	patternChunks := idx.createPatternChunks(patterns, repoCfg.Name)
+	allChunks = append(allChunks, patternChunks...)
 
 	// Generate embeddings
 	idx.logger.Info("generating embeddings", "chunks", len(allChunks))
@@ -166,4 +204,53 @@ func inferModulePath(relPath string, cfg *config.RepoConfig) string {
 	}
 
 	return strings.Join(parts, ".")
+}
+
+// extractSymbols parses a file and returns symbols for pattern detection.
+func (idx *Indexer) extractSymbols(source []byte, filePath string) []parser.Symbol {
+	lang, ok := parser.DetectLanguage(filePath)
+	if !ok {
+		return nil
+	}
+
+	p, err := parser.NewParser(lang)
+	if err != nil {
+		return nil
+	}
+
+	symbols, err := p.Parse(source, filePath)
+	if err != nil {
+		return nil
+	}
+
+	return symbols
+}
+
+// createPatternChunks creates indexable chunks for detected patterns.
+func (idx *Indexer) createPatternChunks(patterns []pattern.Pattern, repo string) []chunk.Chunk {
+	var chunks []chunk.Chunk
+
+	for _, p := range patterns {
+		// Create a pattern description chunk
+		content := fmt.Sprintf("# %s Pattern\n\n%s\n\n## Example Files\n", p.Name, p.Description)
+		for _, member := range p.Members {
+			content += fmt.Sprintf("- %s\n", member)
+		}
+		content += fmt.Sprintf("\n## Canonical Example\n%s\n", p.CanonicalFile)
+
+		c := chunk.Chunk{
+			ID:              chunk.GenerateID(repo, "patterns", p.Name, 0),
+			Repo:            repo,
+			FilePath:        p.CanonicalFile,
+			Type:            chunk.ChunkTypeDoc,
+			Kind:            "pattern",
+			SymbolName:      p.Name,
+			Content:         content,
+			RetrievalWeight: 1.5, // Boost pattern chunks
+		}
+
+		chunks = append(chunks, c)
+	}
+
+	return chunks
 }

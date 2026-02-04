@@ -53,3 +53,8 @@ func (c *Chunk) TokenEstimate() int {
 	// Rough estimate: ~4 chars per token
 	return len(c.Content) / 4
 }
+
+// GenerateID creates a deterministic ID for a chunk.
+func GenerateID(repo, filePath, symbolName string, startLine int) string {
+	return generateChunkID(repo, filePath, symbolName, startLine)
+}

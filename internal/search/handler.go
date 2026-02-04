@@ -336,8 +336,24 @@ func (h *Handler) searchBySymbol(ctx context.Context, query string, filter map[s
 
 // searchByPattern searches for code matching known patterns.
 func (h *Handler) searchByPattern(ctx context.Context, query string, filter map[string]interface{}, limit int) ([]chunk.Chunk, error) {
-	// Pattern search looks for follows_pattern field
-	// For now, fall back to semantic until pattern indexing is implemented
+	// First, search for pattern description chunks
+	patternFilter := make(map[string]interface{})
+	for k, v := range filter {
+		patternFilter[k] = v
+	}
+	patternFilter["kind"] = "pattern"
+
+	results, err := h.store.SearchByFilter(ctx, "chunks", patternFilter, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// If we found pattern chunks, return them
+	if len(results) > 0 {
+		return results, nil
+	}
+
+	// Fall back to semantic search for pattern-related queries
 	return h.searchSemantic(ctx, query, filter, limit)
 }
 
