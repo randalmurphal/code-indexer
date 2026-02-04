@@ -10,7 +10,9 @@ import (
 
 // Extractor converts parsed symbols into chunks.
 type Extractor struct {
-	testPatterns []string
+	testPatterns        []string
+	hierarchical        bool
+	hierarchicalChunker *HierarchicalChunker
 }
 
 // NewExtractor creates a chunk extractor with default test patterns.
@@ -27,7 +29,13 @@ func NewExtractor() *Extractor {
 			"/tests/",
 			"/__tests__/",
 		},
+		hierarchicalChunker: NewHierarchicalChunker(),
 	}
+}
+
+// SetHierarchicalChunking enables or disables hierarchical chunking for large files.
+func (e *Extractor) SetHierarchicalChunking(enabled bool) {
+	e.hierarchical = enabled
 }
 
 // Extract parses code and returns chunks.
@@ -48,6 +56,13 @@ func (e *Extractor) Extract(source []byte, filePath, repo, modulePath string) ([
 	}
 
 	isTest := e.isTestFile(filePath)
+
+	// Use hierarchical chunking if enabled
+	if e.hierarchical {
+		return e.hierarchicalChunker.ChunkSymbols(symbols, filePath, repo, modulePath, isTest), nil
+	}
+
+	// Standard chunking
 	moduleRoot, submodule := parseModulePath(modulePath)
 
 	var chunks []Chunk
