@@ -31,6 +31,7 @@ results, err := store.Search(ctx, "chunks", queryVector, 10, nil)
 | `DeleteCollection(ctx, name)` | Remove collection |
 | `UpsertChunks(ctx, coll, chunks)` | Insert/update chunks |
 | `Search(ctx, coll, vec, limit, filter)` | Vector similarity search |
+| `SearchByFilter(ctx, coll, filter, limit)` | Filter-only search (no vector) |
 | `CollectionInfo(ctx, name)` | Get collection stats |
 
 ## Payload Fields
@@ -69,9 +70,23 @@ results, err := store.Search(ctx, "chunks", vec, 10, filter)
 |----------|---------|-------------|
 | `QDRANT_URL` | `localhost:6334` | Qdrant gRPC endpoint |
 
+## SearchByFilter
+
+Non-vector search using payload filters only:
+```go
+filter := map[string]interface{}{
+    "kind": "pattern",
+    "repo": "my-repo",
+}
+results, err := store.SearchByFilter(ctx, "chunks", filter, 100)
+```
+
+Used by pattern detection queries that don't need semantic matching.
+
 ## Gotchas
 
 1. **URL format**: Use `localhost:6334` not `http://localhost:6333`
 2. **Vectors cleared on search** - Results have `Vector: nil` to save memory
 3. **EnsureCollection is idempotent** - Safe to call multiple times
 4. **Cosine distance** - Collection uses cosine similarity by default
+5. **SearchByFilter** - No scoring, returns by internal ID order

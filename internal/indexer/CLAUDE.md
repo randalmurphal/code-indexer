@@ -4,7 +4,7 @@ Pipeline orchestration and file walking for code indexing.
 
 ## Purpose
 
-Coordinate the full indexing pipeline: walk files → extract chunks → generate embeddings → store in Qdrant. Handles batching and error collection.
+Coordinate the full indexing pipeline: walk files → extract chunks → generate embeddings → store in Qdrant. Handles batching, error collection, module inference, and navigation doc indexing.
 
 ## Key Types
 
@@ -13,6 +13,7 @@ Coordinate the full indexing pipeline: walk files → extract chunks → generat
 | `Indexer` | Pipeline coordinator | `indexer.go:19-25` |
 | `Walker` | File traversal | `walker.go:12-15` |
 | `IndexResult` | Indexing stats | `indexer.go:46-50` |
+| `ModuleInferrer` | Module path resolver | `module.go:10-14` |
 
 ## Usage
 
@@ -57,10 +58,27 @@ walker.Walk(root, func(path string) error {
 
 ## Module Path Inference
 
-`inferModulePath` converts file paths:
-- Input: `fisio/fisio/imports/aws.py`
-- Output: `fisio.imports`
-- Duplicate prefixes removed automatically
+`ModuleInferrer` resolves paths using repo config:
+
+```go
+inferrer := NewModuleInferrer(repoConfig)
+modulePath, moduleRoot, submodule := inferrer.InferModule(filePath)
+```
+
+| Input | ModulePath | ModuleRoot | Submodule |
+|-------|------------|------------|-----------|
+| `fisio/imports/aws.py` | `fisio.imports` | `fisio` | `imports` |
+| `src/utils/helpers.py` | `src.utils` | `src` | `utils` |
+
+Config-based: Uses `modules` map in `.ai-devtools.yaml` for descriptions.
+
+## Navigation Doc Indexing
+
+`indexNavigationDocs()` indexes AGENTS.md/CLAUDE.md files:
+1. Walker finds `AGENTS.md` and `CLAUDE.md` files
+2. Parse with `docs.ParseAgentsMD()`
+3. Convert to chunks with `RetrievalWeight: 1.5` (boosted)
+4. Include in batch embedding/storage
 
 ## Gotchas
 
@@ -68,3 +86,4 @@ walker.Walk(root, func(path string) error {
 2. **Embedding text** - Combines `ContextHeader + Docstring + Content` for better vectors
 3. **Collection name** - Hardcoded to `"chunks"`
 4. **Batch sizes** - 64 for embeddings (API limit 128), 100 for Qdrant
+5. **Nav docs boosted** - 1.5x retrieval weight ensures docs surface in searches

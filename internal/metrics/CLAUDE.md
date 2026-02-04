@@ -1,16 +1,19 @@
 # metrics package
 
-JSONL event logging for analytics and debugging.
+JSONL event logging and analysis for analytics and debugging.
 
 ## Purpose
 
-Log search events, context injections, file reads, and errors to a JSONL file for later analysis.
+Log search events to JSONL file and analyze logs for operational insights. Supports real-time logging and offline analysis.
 
 ## Key Types
 
 | Type | Description | Location |
 |------|-------------|----------|
 | `Logger` | Thread-safe JSONL writer | `logger.go:15-18` |
+| `Analyzer` | Log parsing/analysis | `analyzer.go:14-16` |
+| `Summary` | Analysis results | `analyzer.go:18-28` |
+| `QueryCount` | Query frequency | `analyzer.go:30-33` |
 
 ## Usage
 
@@ -46,8 +49,39 @@ One JSON object per line (JSONL):
 
 Default: `~/.local/share/code-index/metrics.jsonl`
 
+## Analysis
+
+`Analyzer` parses JSONL logs for insights:
+
+```go
+analyzer := metrics.NewAnalyzer(logPath)
+summary, err := analyzer.Analyze(24 * time.Hour)  // Last 24 hours
+zeroResults, err := analyzer.GetZeroResultQueries(24 * time.Hour)
+topQueries, err := analyzer.GetTopQueries(24 * time.Hour, 10)
+```
+
+## Summary Fields
+
+| Field | Description |
+|-------|-------------|
+| `TotalSearches` | Total search count |
+| `SearchesByType` | Map of query_type → count |
+| `AvgLatencyMs` | Average search latency |
+| `CacheHitRate` | Cache hit percentage (0-1) |
+| `ZeroResultRate` | Zero-result percentage (0-1) |
+
+## CLI
+
+```bash
+code-indexer metrics --last 24h
+code-indexer metrics --zero-results --last 7d
+code-indexer metrics --json --last 1h
+```
+
 ## Gotchas
 
 1. **Thread-safe** - Uses mutex for concurrent writes
 2. **Append-only** - File opened with O_APPEND flag
 3. **Fire and forget** - Log methods don't return errors
+4. **Time filtering** - Analyzer filters by `ts` field in JSONL
+5. **Zero results** - Queries with `results: 0` tracked for search quality

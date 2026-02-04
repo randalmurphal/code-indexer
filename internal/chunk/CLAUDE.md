@@ -4,7 +4,7 @@ Chunk model and extraction for indexable code units.
 
 ## Purpose
 
-Transform parsed symbols into indexable chunks with metadata for semantic search. Handles test file detection, module path inference, and context injection.
+Transform parsed symbols into indexable chunks with metadata for semantic search. Handles test file detection, module path inference, context injection, hierarchical chunking, and secret redaction.
 
 ## Key Types
 
@@ -12,7 +12,8 @@ Transform parsed symbols into indexable chunks with metadata for semantic search
 |------|-------------|----------|
 | `Chunk` | Indexable unit | `chunk.go:12-46` |
 | `ChunkType` | code or doc | `chunk.go:7-10` |
-| `Extractor` | Symbol→Chunk converter | `extractor.go:12-14` |
+| `Extractor` | Symbol→Chunk converter | `extractor.go:12-17` |
+| `HierarchicalChunker` | Large file splitter | `hierarchy.go:12-15` |
 
 ## Chunk Fields
 
@@ -65,8 +66,28 @@ File paths convert to module paths:
 - `fisio/fisio/imports/aws.py` → `fisio.imports` (duplicate prefix removed)
 - `src/utils/helpers.py` → `src.utils`
 
+## Hierarchical Chunking
+
+Large classes (>50 methods) split into hierarchical chunks:
+
+| Chunk Type | Content | Kind |
+|------------|---------|------|
+| `class_summary` | Class signature + docstring + method list | `class` |
+| Method chunks | Individual methods with context header | `method` |
+
+Enable via `extractor.SetHierarchicalChunking(true)`.
+
+## Secret Redaction
+
+Integrated with `security.SecretDetector`:
+- API keys, AWS keys, passwords, connection strings, private keys, JWTs
+- Placeholder patterns (`example`, `your-`, `xxx`) skip redaction
+- `Chunk.HasSecrets` flag set when redaction occurs
+
 ## Gotchas
 
 1. **RetrievalWeight** affects search ranking - test code ranks lower
 2. **ID is deterministic** - same input always produces same ID
 3. **TokenEstimate** is rough (~4 chars/token)
+4. **Hierarchical threshold** - 50 methods triggers class splitting
+5. **Secret detection** - Runs after chunk creation, before embedding
