@@ -23,12 +23,13 @@ import (
 
 // Handler implements mcp.Handler for code search.
 type Handler struct {
-	config   *config.Config
-	embedder *embedding.VoyageClient
-	store    *store.QdrantStore
-	cache    *cache.RedisCache
-	metrics  *metrics.Logger
-	logger   *slog.Logger
+	config     *config.Config
+	embedder   *embedding.VoyageClient
+	store      *store.QdrantStore
+	cache      *cache.RedisCache
+	metrics    *metrics.Logger
+	classifier *Classifier
+	logger     *slog.Logger
 }
 
 // NewHandler creates a new search handler.
@@ -61,12 +62,13 @@ func NewHandler(cfg *config.Config, voyageKey string, logger *slog.Logger) (*Han
 	}
 
 	return &Handler{
-		config:   cfg,
-		embedder: embedder,
-		store:    qdrantStore,
-		cache:    queryCache,
-		metrics:  metricsLogger,
-		logger:   logger,
+		config:     cfg,
+		embedder:   embedder,
+		store:      qdrantStore,
+		cache:      queryCache,
+		metrics:    metricsLogger,
+		classifier: NewClassifier(),
+		logger:     logger,
 	}, nil
 }
 
@@ -181,9 +183,19 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		limit = int(l)
 	}
 
+	// Classify query to determine search strategy
+	queryType := h.classifier.Classify(query)
+	strategy := h.classifier.Route(queryType)
+
+	// Override limit if strategy specifies
+	if strategy.MaxResults > 0 && strategy.MaxResults < limit {
+		limit = strategy.MaxResults
+	}
+
 	if h.logger != nil {
 		h.logger.Info("search_code called",
 			"query", query,
+			"query_type", string(queryType),
 			"repo", repo,
 			"module", module,
 			"limit", limit,
@@ -200,20 +212,13 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 			if h.logger != nil {
 				h.logger.Debug("cache hit", "query", query, "repo", repo)
 			}
-			// Log metrics for cache hit
 			if h.metrics != nil {
-				h.metrics.LogSearch(query, "concept", -1, time.Since(startTime).Milliseconds(), true)
+				h.metrics.LogSearch(query, string(queryType), -1, time.Since(startTime).Milliseconds(), true)
 			}
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{{Type: "text", Text: cached}},
 			}, nil
 		}
-	}
-
-	// Generate query embedding
-	vectors, err := h.embedder.Embed(ctx, []string{query})
-	if err != nil {
-		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
 
 	// Build filter
@@ -231,17 +236,25 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		filter["is_test"] = true
 	}
 
-	// Search - get extra for weighting adjustment
-	results, err := h.store.Search(ctx, "chunks", vectors[0], limit*2, filter)
+	// Route to appropriate search based on strategy
+	var results []chunk.Chunk
+	var err error
+
+	switch {
+	case strategy.UseSymbolIndex:
+		results, err = h.searchBySymbol(ctx, query, filter, limit)
+	case strategy.UsePatternIndex:
+		results, err = h.searchByPattern(ctx, query, filter, limit)
+	default:
+		results, err = h.searchSemantic(ctx, query, filter, limit)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	// Apply retrieval weight and truncate
-	results = h.applyWeights(results, limit)
-
 	// Format response
-	response := h.formatSearchResponse(query, results, repo)
+	response := h.formatSearchResponseWithType(query, queryType, results, repo)
 
 	// Cache result
 	if h.cache != nil && cacheKey != "" {
@@ -251,9 +264,9 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		}
 	}
 
-	// Log metrics for cache miss
+	// Log metrics
 	if h.metrics != nil {
-		h.metrics.LogSearch(query, "concept", len(results), time.Since(startTime).Milliseconds(), false)
+		h.metrics.LogSearch(query, string(queryType), len(results), time.Since(startTime).Milliseconds(), false)
 	}
 
 	return &mcp.CallToolResult{
@@ -276,13 +289,69 @@ func (h *Handler) applyWeights(chunks []chunk.Chunk, limit int) []chunk.Chunk {
 	return chunks
 }
 
+// searchSemantic performs vector similarity search.
+func (h *Handler) searchSemantic(ctx context.Context, query string, filter map[string]interface{}, limit int) ([]chunk.Chunk, error) {
+	vectors, err := h.embedder.Embed(ctx, []string{query})
+	if err != nil {
+		return nil, fmt.Errorf("embedding failed: %w", err)
+	}
+
+	// Get extra results for weighting adjustment
+	results, err := h.store.Search(ctx, "chunks", vectors[0], limit*2, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.applyWeights(results, limit), nil
+}
+
+// searchBySymbol searches for exact or fuzzy symbol name matches.
+func (h *Handler) searchBySymbol(ctx context.Context, query string, filter map[string]interface{}, limit int) ([]chunk.Chunk, error) {
+	symbolName := extractSymbolName(query)
+	if symbolName == "" {
+		// Fall back to semantic search if no symbol found
+		return h.searchSemantic(ctx, query, filter, limit)
+	}
+
+	// Add symbol filter
+	symbolFilter := make(map[string]interface{})
+	for k, v := range filter {
+		symbolFilter[k] = v
+	}
+	symbolFilter["symbol_name"] = symbolName
+
+	// Try exact match first
+	results, err := h.store.SearchByFilter(ctx, "chunks", symbolFilter, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// If no exact match, fall back to semantic search
+	if len(results) == 0 {
+		return h.searchSemantic(ctx, query, filter, limit)
+	}
+
+	return results, nil
+}
+
+// searchByPattern searches for code matching known patterns.
+func (h *Handler) searchByPattern(ctx context.Context, query string, filter map[string]interface{}, limit int) ([]chunk.Chunk, error) {
+	// Pattern search looks for follows_pattern field
+	// For now, fall back to semantic until pattern indexing is implemented
+	return h.searchSemantic(ctx, query, filter, limit)
+}
+
 func (h *Handler) formatSearchResponse(query string, results []chunk.Chunk, repo string) string {
+	return h.formatSearchResponseWithType(query, QueryTypeConcept, results, repo)
+}
+
+func (h *Handler) formatSearchResponseWithType(query string, queryType QueryType, results []chunk.Chunk, repo string) string {
 	if len(results) == 0 {
 		return h.formatEmptyResponse(query, repo)
 	}
 
 	response := SearchResponse{
-		QueryType:  "concept_search",
+		QueryType:  string(queryType),
 		Results:    make([]SearchResult, len(results)),
 		TotalCount: len(results),
 		HasMore:    false,

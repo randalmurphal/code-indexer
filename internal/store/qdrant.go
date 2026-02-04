@@ -126,6 +126,28 @@ func (s *QdrantStore) Search(ctx context.Context, collection string, vector []fl
 	return chunks, nil
 }
 
+// SearchByFilter searches using payload filters without vector similarity.
+func (s *QdrantStore) SearchByFilter(ctx context.Context, collection string, filter map[string]interface{}, limit int) ([]chunk.Chunk, error) {
+	qdrantFilter := buildFilter(filter)
+
+	results, err := s.client.Scroll(ctx, &qdrant.ScrollPoints{
+		CollectionName: collection,
+		Filter:         qdrantFilter,
+		Limit:          qdrant.PtrOf(uint32(limit)),
+		WithPayload:    qdrant.NewWithPayload(true),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	chunks := make([]chunk.Chunk, len(results))
+	for i, r := range results {
+		chunks[i] = payloadToChunk(r.Id.GetUuid(), r.Payload)
+	}
+
+	return chunks, nil
+}
+
 // CollectionInfo contains collection metadata.
 type CollectionInfo struct {
 	PointsCount int64
