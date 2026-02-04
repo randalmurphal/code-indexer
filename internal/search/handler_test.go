@@ -94,7 +94,10 @@ func TestHandlerSearchIntegration(t *testing.T) {
 
 func TestFormatEmptyResponse(t *testing.T) {
 	cfg := config.DefaultConfig()
-	handler := &Handler{config: cfg}
+	handler := &Handler{
+		config:        cfg,
+		suggestionGen: NewSuggestionGenerator(),
+	}
 
 	response := handler.formatEmptyResponse("test query", "my-repo")
 

@@ -23,13 +23,14 @@ import (
 
 // Handler implements mcp.Handler for code search.
 type Handler struct {
-	config     *config.Config
-	embedder   *embedding.VoyageClient
-	store      *store.QdrantStore
-	cache      *cache.RedisCache
-	metrics    *metrics.Logger
-	classifier *Classifier
-	logger     *slog.Logger
+	config        *config.Config
+	embedder      *embedding.VoyageClient
+	store         *store.QdrantStore
+	cache         *cache.RedisCache
+	metrics       *metrics.Logger
+	classifier    *Classifier
+	suggestionGen *SuggestionGenerator
+	logger        *slog.Logger
 }
 
 // NewHandler creates a new search handler.
@@ -62,13 +63,14 @@ func NewHandler(cfg *config.Config, voyageKey string, logger *slog.Logger) (*Han
 	}
 
 	return &Handler{
-		config:     cfg,
-		embedder:   embedder,
-		store:      qdrantStore,
-		cache:      queryCache,
-		metrics:    metricsLogger,
-		classifier: NewClassifier(),
-		logger:     logger,
+		config:        cfg,
+		embedder:      embedder,
+		store:         qdrantStore,
+		cache:         queryCache,
+		metrics:       metricsLogger,
+		classifier:    NewClassifier(),
+		suggestionGen: NewSuggestionGenerator(),
+		logger:        logger,
 	}, nil
 }
 
@@ -392,19 +394,9 @@ func (h *Handler) formatSearchResponseWithType(query string, queryType QueryType
 }
 
 func (h *Handler) formatEmptyResponse(query, repo string) string {
-	response := map[string]interface{}{
-		"results":    []interface{}{},
-		"query_type": "concept_search",
-		"message":    fmt.Sprintf("No direct matches for '%s'", query),
-		"suggestions": []string{
-			"Try broader search terms",
-			"Check if the repository is indexed: code-indexer status",
-		},
-	}
-
-	if repo != "" && repo != "all" {
-		response["hint"] = fmt.Sprintf("Searched only in %s. Try repo: 'all' for cross-repo search.", repo)
-	}
+	// Generate suggestions based on query
+	suggestions := h.suggestionGen.Generate(query)
+	response := h.suggestionGen.FormatEmptyResponse(query, repo, suggestions)
 
 	data, _ := json.MarshalIndent(response, "", "  ")
 	return string(data)
