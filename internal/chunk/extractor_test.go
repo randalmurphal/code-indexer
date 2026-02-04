@@ -145,6 +145,25 @@ func TestExtractUnsupportedFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported file type")
 }
 
+func TestExtractRedactsSecrets(t *testing.T) {
+	code := `
+def connect_db():
+    """Connect to database."""
+    password = "supersecret123456"
+    return Database(password=password)
+`
+
+	extractor := NewExtractor()
+	chunks, err := extractor.Extract([]byte(code), "db.py", "repo", "module")
+	require.NoError(t, err)
+	require.Len(t, chunks, 1)
+
+	chunk := chunks[0]
+	assert.True(t, chunk.HasSecrets, "should flag HasSecrets")
+	assert.Contains(t, chunk.Content, "[REDACTED]", "should redact secret")
+	assert.NotContains(t, chunk.Content, "supersecret", "should not contain original secret")
+}
+
 func findChunkByName(chunks []Chunk, name string) *Chunk {
 	for i := range chunks {
 		if chunks[i].SymbolName == name {

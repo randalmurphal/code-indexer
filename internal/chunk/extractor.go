@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphy/ai-devtools-admin/internal/security"
 )
 
 // Extractor converts parsed symbols into chunks.
@@ -13,6 +14,7 @@ type Extractor struct {
 	testPatterns        []string
 	hierarchical        bool
 	hierarchicalChunker *HierarchicalChunker
+	secretDetector      *security.SecretDetector
 }
 
 // NewExtractor creates a chunk extractor with default test patterns.
@@ -30,6 +32,7 @@ func NewExtractor() *Extractor {
 			"/__tests__/",
 		},
 		hierarchicalChunker: NewHierarchicalChunker(),
+		secretDetector:      security.NewSecretDetector(),
 	}
 }
 
@@ -99,6 +102,13 @@ func (e *Extractor) Extract(source []byte, filePath, repo, modulePath string) ([
 
 		// Generate ID
 		chunk.ID = generateChunkID(repo, filePath, sym.Name, sym.StartLine)
+
+		// Detect and redact secrets
+		if e.secretDetector.HasSecrets(chunk.Content) {
+			secrets := e.secretDetector.Detect(chunk.Content)
+			chunk.Content = e.secretDetector.Redact(chunk.Content, secrets)
+			chunk.HasSecrets = true
+		}
 
 		chunks = append(chunks, chunk)
 	}
