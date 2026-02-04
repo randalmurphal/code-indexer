@@ -26,6 +26,11 @@ func NewQdrantStore(url string) (*QdrantStore, error) {
 	return &QdrantStore{client: client}, nil
 }
 
+// Close closes the Qdrant connection.
+func (s *QdrantStore) Close() error {
+	return s.client.Close()
+}
+
 // EnsureCollection creates collection if it doesn't exist.
 func (s *QdrantStore) EnsureCollection(ctx context.Context, name string, vectorSize int) error {
 	exists, err := s.client.CollectionExists(ctx, name)
@@ -115,6 +120,7 @@ func (s *QdrantStore) Search(ctx context.Context, collection string, vector []fl
 	for i, r := range results {
 		chunks[i] = payloadToChunk(r.Id.GetUuid(), r.Payload)
 		chunks[i].Vector = nil // Don't return vectors in results
+		chunks[i].Score = r.Score
 	}
 
 	return chunks, nil

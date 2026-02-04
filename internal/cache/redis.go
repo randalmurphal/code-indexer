@@ -54,14 +54,30 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
 
-// DeletePattern removes all keys matching pattern.
+// DeletePattern removes all keys matching pattern using batched pipeline.
 func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 	iter := c.client.Scan(ctx, 0, pattern, 100).Iterator()
+	pipe := c.client.Pipeline()
+	count := 0
+
 	for iter.Next(ctx) {
-		if err := c.client.Del(ctx, iter.Val()).Err(); err != nil {
+		pipe.Del(ctx, iter.Val())
+		count++
+		if count >= 100 {
+			if _, err := pipe.Exec(ctx); err != nil {
+				return err
+			}
+			pipe = c.client.Pipeline()
+			count = 0
+		}
+	}
+
+	if count > 0 {
+		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
 	}
+
 	return iter.Err()
 }
 
@@ -88,9 +104,4 @@ func (c *RedisCache) Close() error {
 func QueryCacheKey(repo, query string, version int64) string {
 	h := sha256.Sum256([]byte(query))
 	return fmt.Sprintf("query:%s:%x:%d", repo, h[:8], version)
-}
-
-// EmbeddingCacheKey generates a cache key for an embedding.
-func EmbeddingCacheKey(model, contentHash string) string {
-	return fmt.Sprintf("embed:%s:%s", model, contentHash)
 }

@@ -74,6 +74,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create handler: %w", err)
 	}
+	defer handler.Close()
 
 	// Create server
 	server := mcp.NewServer(serverName, serverVersion, handler, logger)

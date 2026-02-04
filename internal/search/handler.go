@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,6 +57,17 @@ func NewHandler(cfg *config.Config, voyageKey string, logger *slog.Logger) (*Han
 		cache:    queryCache,
 		logger:   logger,
 	}, nil
+}
+
+// Close releases resources held by the handler.
+func (h *Handler) Close() error {
+	if h.cache != nil {
+		h.cache.Close()
+	}
+	if h.store != nil {
+		h.store.Close()
+	}
+	return nil
 }
 
 // ListTools returns available tools (implements mcp.Handler).
@@ -213,10 +225,9 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 
 	// Cache result
 	if h.cache != nil && cacheKey != "" {
-		if err := h.cache.Set(ctx, cacheKey, response, 10*time.Minute); err != nil {
-			if h.logger != nil {
-				h.logger.Warn("failed to cache result", "error", err)
-			}
+		ttl := time.Duration(h.config.Cache.QueryTTLMinutes) * time.Minute
+		if err := h.cache.Set(ctx, cacheKey, response, ttl); err != nil {
+			h.logger.Warn("failed to cache result", "error", err)
 		}
 	}
 
@@ -225,9 +236,15 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 	}, nil
 }
 
+// applyWeights re-ranks results by score * retrieval_weight, then truncates.
 func (h *Handler) applyWeights(chunks []chunk.Chunk, limit int) []chunk.Chunk {
-	// Sort by effective score (score * retrieval_weight)
-	// For now, just truncate to limit since Qdrant doesn't return scores easily
+	// Sort by effective score (score * retrieval_weight) descending
+	sort.Slice(chunks, func(i, j int) bool {
+		scoreI := chunks[i].Score * chunks[i].RetrievalWeight
+		scoreJ := chunks[j].Score * chunks[j].RetrievalWeight
+		return scoreI > scoreJ
+	})
+
 	if len(chunks) > limit {
 		chunks = chunks[:limit]
 	}

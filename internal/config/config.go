@@ -13,6 +13,11 @@ type Config struct {
 	Embedding EmbeddingConfig `yaml:"embedding"`
 	Storage   StorageConfig   `yaml:"storage"`
 	Logging   LoggingConfig   `yaml:"logging"`
+	Cache     CacheConfig     `yaml:"cache"`
+}
+
+type CacheConfig struct {
+	QueryTTLMinutes int `yaml:"query_ttl_minutes"` // Query cache TTL in minutes (default: 10)
 }
 
 type EmbeddingConfig struct {
@@ -62,6 +67,9 @@ func DefaultConfig() *Config {
 			Level:     "info",
 			MaxSizeMB: 50,
 			MaxFiles:  3,
+		},
+		Cache: CacheConfig{
+			QueryTTLMinutes: 10,
 		},
 	}
 }

@@ -133,8 +133,3 @@ func TestQueryCacheKey(t *testing.T) {
 	key4 := QueryCacheKey("test-repo", "hello world", 43)
 	assert.NotEqual(t, key, key4)
 }
-
-func TestEmbeddingCacheKey(t *testing.T) {
-	key := EmbeddingCacheKey("voyage-4-large", "abc123")
-	assert.Equal(t, "embed:voyage-4-large:abc123", key)
-}

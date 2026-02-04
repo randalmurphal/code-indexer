@@ -43,6 +43,9 @@ type Chunk struct {
 
 	// Vector (populated after embedding)
 	Vector []float32 `json:"vector,omitempty"`
+
+	// Score (populated by search, not stored)
+	Score float32 `json:"-"`
 }
 
 // TokenEstimate returns rough token count for the chunk.
