@@ -118,6 +118,10 @@ func (h *Handler) ListTools() []mcp.Tool {
 						Type:        "number",
 						Description: "Maximum results to return (default: 10)",
 					},
+					"cursor": {
+						Type:        "string",
+						Description: "Pagination cursor from previous response (for fetching next page)",
+					},
 				},
 				Required: []string{"query"},
 			},
@@ -185,6 +189,19 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 		limit = int(l)
 	}
 
+	// Handle cursor for pagination
+	var offset int
+	if cursorStr, ok := args["cursor"].(string); ok && cursorStr != "" {
+		cursor, err := DecodeCursor(cursorStr)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{{Type: "text", Text: fmt.Sprintf("invalid cursor: %s", err.Error())}},
+				IsError: true,
+			}, nil
+		}
+		offset = cursor.Offset
+	}
+
 	// Classify query to determine search strategy
 	queryType := h.classifier.Classify(query)
 	strategy := h.classifier.Route(queryType)
@@ -239,24 +256,52 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 	}
 
 	// Route to appropriate search based on strategy
+	// Fetch more results than needed for pagination
+	fetchLimit := offset + limit + 1
 	var results []chunk.Chunk
 	var err error
 
 	switch {
 	case strategy.UseSymbolIndex:
-		results, err = h.searchBySymbol(ctx, query, filter, limit)
+		results, err = h.searchBySymbol(ctx, query, filter, fetchLimit)
 	case strategy.UsePatternIndex:
-		results, err = h.searchByPattern(ctx, query, filter, limit)
+		results, err = h.searchByPattern(ctx, query, filter, fetchLimit)
 	default:
-		results, err = h.searchSemantic(ctx, query, filter, limit)
+		results, err = h.searchSemantic(ctx, query, filter, fetchLimit)
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
+	// Convert chunks to search results for pagination
+	searchResults := make([]SearchResult, len(results))
+	for i, c := range results {
+		searchResults[i] = SearchResult{
+			FilePath:   c.FilePath,
+			Module:     c.ModulePath,
+			SymbolName: c.SymbolName,
+			Kind:       c.Kind,
+			StartLine:  c.StartLine,
+			EndLine:    c.EndLine,
+			Content:    c.Content,
+			Docstring:  c.Docstring,
+			IsTest:     c.IsTest,
+		}
+	}
+
+	// Apply pagination
+	queryHash := HashQuery(query, repo, module)
+	paginated := Paginate(searchResults, offset, limit, queryHash, string(queryType))
+
 	// Format response
-	response := h.formatSearchResponseWithType(query, queryType, results, repo)
+	var response string
+	if len(paginated.Results) == 0 && offset == 0 {
+		response = h.formatEmptyResponse(query, repo)
+	} else {
+		data, _ := json.MarshalIndent(paginated, "", "  ")
+		response = string(data)
+	}
 
 	// Cache result
 	if h.cache != nil && cacheKey != "" {
@@ -268,7 +313,7 @@ func (h *Handler) searchCode(ctx context.Context, args map[string]interface{}) (
 
 	// Log metrics
 	if h.metrics != nil {
-		h.metrics.LogSearch(query, string(queryType), len(results), time.Since(startTime).Milliseconds(), false)
+		h.metrics.LogSearch(query, string(queryType), len(paginated.Results), time.Since(startTime).Milliseconds(), false)
 	}
 
 	return &mcp.CallToolResult{
