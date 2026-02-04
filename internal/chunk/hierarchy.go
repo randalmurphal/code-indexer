@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 )
 
 const (

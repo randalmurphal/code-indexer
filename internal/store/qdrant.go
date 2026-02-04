@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/qdrant/go-client/qdrant"
-	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 )
 
 // QdrantStore handles vector storage in Qdrant.

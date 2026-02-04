@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 )
 
 // AgentsDoc represents a parsed AGENTS.md file.

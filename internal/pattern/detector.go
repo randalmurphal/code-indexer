@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 )
 
 // Pattern represents a detected code pattern.

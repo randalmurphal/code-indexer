@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/cache"
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/cache"
+	"github.com/randalmurphal/code-indexer/internal/config"
 	"github.com/spf13/cobra"
 )
 

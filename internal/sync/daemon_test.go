@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

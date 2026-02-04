@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
-	"github.com/randalmurphy/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/store"
 	"github.com/spf13/cobra"
 )
 

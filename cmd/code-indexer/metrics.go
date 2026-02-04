@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/metrics"
+	"github.com/randalmurphal/code-indexer/internal/metrics"
 	"github.com/spf13/cobra"
 )
 

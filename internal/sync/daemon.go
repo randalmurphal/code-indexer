@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
-	"github.com/randalmurphy/ai-devtools-admin/internal/indexer"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/indexer"
 )
 
 // Daemon watches repositories and syncs on changes.

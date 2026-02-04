@@ -1,4 +1,4 @@
-module github.com/randalmurphy/ai-devtools-admin
+module github.com/randalmurphal/code-indexer
 
 go 1.25.0
 

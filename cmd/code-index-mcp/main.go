@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
-	"github.com/randalmurphy/ai-devtools-admin/internal/mcp"
-	"github.com/randalmurphy/ai-devtools-admin/internal/search"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/mcp"
+	"github.com/randalmurphal/code-indexer/internal/search"
 	"github.com/spf13/cobra"
 )
 

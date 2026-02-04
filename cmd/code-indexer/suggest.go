@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
-	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
-	"github.com/randalmurphy/ai-devtools-admin/internal/graph"
-	"github.com/randalmurphy/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/embedding"
+	"github.com/randalmurphal/code-indexer/internal/graph"
+	"github.com/randalmurphal/code-indexer/internal/store"
 	"github.com/spf13/cobra"
 )
 

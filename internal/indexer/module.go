@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/config"
 )
 
 // ModuleResolver resolves file paths to module paths.

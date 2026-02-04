@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
-	"github.com/randalmurphy/ai-devtools-admin/internal/security"
+	"github.com/randalmurphal/code-indexer/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/security"
 )
 
 // Extractor converts parsed symbols into chunks.

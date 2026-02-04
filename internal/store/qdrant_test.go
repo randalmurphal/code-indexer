@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

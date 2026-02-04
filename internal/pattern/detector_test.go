@@ -3,7 +3,7 @@ package pattern
 import (
 	"testing"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/randalmurphy/ai-devtools-admin/internal/config"
-	"github.com/randalmurphy/ai-devtools-admin/internal/indexer"
-	"github.com/randalmurphy/ai-devtools-admin/internal/sync"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/indexer"
+	"github.com/randalmurphal/code-indexer/internal/sync"
 	"github.com/spf13/cobra"
 )
 
