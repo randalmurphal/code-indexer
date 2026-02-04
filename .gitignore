@@ -1,0 +1,49 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+code-indexer
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go workspace
+go.work
+go.work.sum
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Node (if any tooling uses it)
+node_modules/
+package-lock.json
+package.json
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+tmp/
+*.tmp
+*.log
