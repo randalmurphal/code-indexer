@@ -10,6 +10,7 @@ import (
 
 	"github.com/randalmurphy/ai-devtools-admin/internal/chunk"
 	"github.com/randalmurphy/ai-devtools-admin/internal/config"
+	"github.com/randalmurphy/ai-devtools-admin/internal/docs"
 	"github.com/randalmurphy/ai-devtools-admin/internal/embedding"
 	"github.com/randalmurphy/ai-devtools-admin/internal/parser"
 	"github.com/randalmurphy/ai-devtools-admin/internal/pattern"
@@ -134,6 +135,11 @@ func (idx *Indexer) Index(ctx context.Context, repoPath string, repoCfg *config.
 	patternChunks := idx.createPatternChunks(patterns, repoCfg.Name)
 	allChunks = append(allChunks, patternChunks...)
 
+	// Index AGENTS.md and CLAUDE.md files for navigation
+	docChunks := idx.indexNavigationDocs(repoPath, repoCfg.Name)
+	idx.logger.Info("navigation docs indexed", "chunks", len(docChunks))
+	allChunks = append(allChunks, docChunks...)
+
 	// Generate embeddings
 	idx.logger.Info("generating embeddings", "chunks", len(allChunks))
 
@@ -253,4 +259,69 @@ func (idx *Indexer) createPatternChunks(patterns []pattern.Pattern, repo string)
 	}
 
 	return chunks
+}
+
+// indexNavigationDocs finds and indexes AGENTS.md and CLAUDE.md files.
+func (idx *Indexer) indexNavigationDocs(repoPath, repo string) []chunk.Chunk {
+	var allChunks []chunk.Chunk
+
+	// Files to look for
+	navFiles := []string{"AGENTS.md", "CLAUDE.md"}
+
+	// Walk directory tree looking for navigation docs
+	err := filepath.WalkDir(repoPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip hidden and common excluded directories
+		if d.IsDir() {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "venv" || name == "__pycache__" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check if this is a navigation doc
+		fileName := d.Name()
+		isNavDoc := false
+		for _, navFile := range navFiles {
+			if fileName == navFile {
+				isNavDoc = true
+				break
+			}
+		}
+
+		if !isNavDoc {
+			return nil
+		}
+
+		// Read and parse the file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			idx.logger.Warn("failed to read nav doc", "path", path, "error", err)
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(repoPath, path)
+		idx.logger.Info("indexing navigation doc", "path", relPath)
+
+		doc, err := docs.ParseAgentsMD(content, relPath, repo)
+		if err != nil {
+			idx.logger.Warn("failed to parse nav doc", "path", path, "error", err)
+			return nil
+		}
+
+		chunks := doc.ToChunks()
+		allChunks = append(allChunks, chunks...)
+
+		return nil
+	})
+
+	if err != nil {
+		idx.logger.Warn("error walking for nav docs", "error", err)
+	}
+
+	return allChunks
 }
