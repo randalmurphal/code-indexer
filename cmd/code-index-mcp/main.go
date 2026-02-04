@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/randalmurphy/ai-devtools-admin/internal/config"
 	"github.com/randalmurphy/ai-devtools-admin/internal/mcp"
+	"github.com/randalmurphy/ai-devtools-admin/internal/search"
 	"github.com/spf13/cobra"
 )
 
@@ -58,8 +60,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	logger.Info("starting MCP server", "name", serverName, "version", serverVersion)
 
-	// Create handler (stub for now, replaced in Task 2)
-	handler := mcp.NewStubHandler()
+	// Load configuration
+	cfg := config.DefaultConfig()
+
+	// Get Voyage API key from environment
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	if voyageKey == "" {
+		return fmt.Errorf("VOYAGE_API_KEY environment variable is required")
+	}
+
+	// Create search handler
+	handler, err := search.NewHandler(cfg, voyageKey, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create handler: %w", err)
+	}
 
 	// Create server
 	server := mcp.NewServer(serverName, serverVersion, handler, logger)
