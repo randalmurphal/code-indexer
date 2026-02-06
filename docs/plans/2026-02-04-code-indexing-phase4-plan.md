@@ -124,7 +124,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 )
 
 const (
@@ -570,7 +570,7 @@ Expected: PASS
 ```go
 // Update internal/chunk/extractor.go
 
-import "github.com/randalmurphal/ai-devtools-admin/internal/security"
+import "github.com/randalmurphal/code-indexer/internal/security"
 
 type Extractor struct {
 	// ... existing fields ...
@@ -950,7 +950,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/metrics"
+	"github.com/randalmurphal/code-indexer/internal/metrics"
 	"github.com/spf13/cobra"
 )
 
@@ -1090,9 +1090,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/cache"
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/indexer"
+	"github.com/randalmurphal/code-indexer/internal/cache"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/indexer"
 )
 
 // Daemon watches repositories and syncs on changes
@@ -1209,10 +1209,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/cache"
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/indexer"
-	"github.com/randalmurphal/ai-devtools-admin/internal/sync"
+	"github.com/randalmurphal/code-indexer/internal/cache"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/indexer"
+	"github.com/randalmurphal/code-indexer/internal/sync"
 	"github.com/spf13/cobra"
 )
 

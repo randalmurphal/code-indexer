@@ -397,9 +397,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/mcp"
-	"github.com/randalmurphal/ai-devtools-admin/internal/search"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/mcp"
+	"github.com/randalmurphal/code-indexer/internal/search"
 	"github.com/spf13/cobra"
 )
 
@@ -522,7 +522,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -582,11 +582,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/chunk"
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/embedding"
-	"github.com/randalmurphal/ai-devtools-admin/internal/mcp"
-	"github.com/randalmurphal/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/embedding"
+	"github.com/randalmurphal/code-indexer/internal/mcp"
+	"github.com/randalmurphal/code-indexer/internal/store"
 )
 
 // Handler implements mcp.Handler for code search
@@ -1377,8 +1377,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -1459,8 +1459,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/cache"
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/cache"
+	"github.com/randalmurphal/code-indexer/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -1616,7 +1616,7 @@ git commit -m "feat: add Claude Code hooks for context suggestions and invalidat
 set -e
 
 # Get the binary path
-BINARY_PATH="${1:-$(which code-index-mcp 2>/dev/null || echo "$HOME/repos/ai-devtools-admin/bin/code-index-mcp")}"
+BINARY_PATH="${1:-$(which code-index-mcp 2>/dev/null || echo "$HOME/repos/code-indexer/bin/code-index-mcp")}"
 
 if [ ! -f "$BINARY_PATH" ]; then
     echo "Error: code-index-mcp binary not found at $BINARY_PATH"

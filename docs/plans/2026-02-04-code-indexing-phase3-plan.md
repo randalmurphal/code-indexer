@@ -431,7 +431,7 @@ package pattern
 import (
 	"testing"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -492,7 +492,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 )
 
 // Pattern represents a detected code pattern
@@ -819,7 +819,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 )
 
 // AgentsDoc represents a parsed AGENTS.md file
@@ -1243,7 +1243,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/config"
 )
 
 // ModuleResolver resolves file paths to module paths

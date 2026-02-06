@@ -138,7 +138,7 @@ Each doc chunk includes:
 
 ```cypher
 // Repository and module hierarchy
-(:Repository {name: "m32rimm", path: "/home/rmurphy/repos/m32rimm"})
+(:Repository {name: "m32rimm", path: "~/repos/m32rimm"})
   -[:CONTAINS]->
 (:Module {
     repo: "m32rimm",
@@ -491,7 +491,7 @@ synonyms:
 {
   "mcpServers": {
     "code-index": {
-      "command": "/home/rmurphy/repos/ai-devtools-admin/code-index-mcp",
+      "command": "code-index-mcp",
       "args": ["serve"],
       "env": {
         "QDRANT_URL": "http://localhost:6333",

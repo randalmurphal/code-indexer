@@ -34,8 +34,8 @@ cd ~/repos/graphrag && docker compose up -d
 **Step 1: Initialize Go module**
 
 ```bash
-cd /home/rmurphy/repos/ai-devtools-admin
-go mod init github.com/randalmurphal/ai-devtools-admin
+cd ~/repos/code-indexer
+go mod init github.com/randalmurphal/code-indexer
 ```
 
 **Step 2: Create main.go with CLI skeleton**
@@ -870,7 +870,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/parser"
+	"github.com/randalmurphal/code-indexer/internal/parser"
 )
 
 // Extractor converts parsed symbols into chunks
@@ -1021,7 +1021,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1095,7 +1095,7 @@ import (
 	"fmt"
 
 	"github.com/qdrant/go-client/qdrant"
-	"github.com/randalmurphal/ai-devtools-admin/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
 )
 
 // QdrantStore handles vector storage in Qdrant
@@ -1712,10 +1712,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/chunk"
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/embedding"
-	"github.com/randalmurphal/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/chunk"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/embedding"
+	"github.com/randalmurphal/code-indexer/internal/store"
 )
 
 // Indexer coordinates the indexing pipeline
@@ -2025,8 +2025,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/indexer"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/indexer"
 	"github.com/spf13/cobra"
 )
 
@@ -2133,8 +2133,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/randalmurphal/ai-devtools-admin/internal/config"
-	"github.com/randalmurphal/ai-devtools-admin/internal/store"
+	"github.com/randalmurphal/code-indexer/internal/config"
+	"github.com/randalmurphal/code-indexer/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -2371,7 +2371,7 @@ At this point you have:
 cd ~/repos/graphrag && docker compose up -d
 
 # Build
-cd /home/rmurphy/repos/ai-devtools-admin
+cd ~/repos/code-indexer
 go build -o bin/code-indexer ./cmd/code-indexer
 
 # Test on a small directory first
